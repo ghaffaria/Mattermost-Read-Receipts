@@ -1,5 +1,5 @@
 import {PluginRegistry} from 'mattermost-webapp/plugins/registry';
-import {Store, combineReducers} from 'redux';
+import {Store, combineReducers, Reducer, AnyAction} from 'redux';
 import {createSlice, PayloadAction} from '@reduxjs/toolkit';
 
 // Define the initial state for the read-receipt slice.
@@ -38,7 +38,7 @@ export default class ReadReceiptPlugin {
             ...store.getState(),
             readReceipt: readReceiptSlice.reducer,
         });
-        store.replaceReducer(rootReducer);
+        store.replaceReducer(rootReducer as Reducer<any, AnyAction>);
 
         console.log('ReadReceiptPlugin initialized');
     }
