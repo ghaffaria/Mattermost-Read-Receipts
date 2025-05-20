@@ -1,0 +1,32 @@
+{
+  "manifest_version": 2,
+  "id": "mattermost-readreceipts",
+  "name": "Read Receipts",
+  "description": "WhatsApp/Telegram-style read receipts for Mattermost posts.",
+  "version": "0.1.0",
+  "min_server_version": "6.0.0",
+
+  "server": {
+    "executable": "server/dist/plugin-linux-amd64"
+  },
+  "webapp": {
+    "bundle_path": "webapp/dist/main.js"
+  },
+
+  "settings_schema": {
+    "settings": [
+      {
+        "key": "EnableReadReceipts",
+        "display_name": "Enable Read Receipts",
+        "type": "bool",
+        "default": true
+      },
+      {
+        "key": "EnableLogging",
+        "display_name": "Enable Logging",
+        "type": "bool",
+        "default": false
+      }
+    ]
+  }
+}
