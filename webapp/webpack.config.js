@@ -24,6 +24,7 @@ module.exports = {
     'react-dom': 'ReactDOM',
     redux: 'Redux',
     'react-redux': 'ReactRedux',
+    '@reduxjs/toolkit': 'RTK',
   },
   devtool: 'source-map',
 };

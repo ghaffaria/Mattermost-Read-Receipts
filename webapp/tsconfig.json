@@ -3,13 +3,15 @@
     "target": "ES6",
     "module": "ESNext",
     "lib": ["DOM", "ESNext"],
-    "jsx": "react-jsx",
+    "jsx": "react",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
-    "paths": {"*": ["node_modules/*"]}
+    "paths": { "*": ["*", "types/*"] },
+    "types": ["react", "react-dom"],
+    "moduleResolution": "nodenext"
   },
   "include": ["**/*"]
 }

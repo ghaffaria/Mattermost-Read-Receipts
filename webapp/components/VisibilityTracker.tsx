@@ -1,11 +1,11 @@
-import React, { useEffect, useRef } from 'react';
+import React, { FC, ReactElement, useEffect, useRef } from 'react';
 import debounce from 'lodash.debounce';
 
 interface VisibilityTrackerProps {
     messageId: string;
 }
 
-const VisibilityTracker: React.FC<VisibilityTrackerProps> = ({ messageId }) => {
+const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElement => {
     const observerRef = useRef<IntersectionObserver | null>(null);
     const elementRef = useRef<HTMLDivElement | null>(null);
 

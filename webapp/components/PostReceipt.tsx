@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { FC, ReactElement } from 'react';
 import { useSelector } from 'react-redux';
 import { RootState } from '../store';
 
@@ -6,7 +6,7 @@ interface PostReceiptProps {
     messageId: string;
 }
 
-const PostReceipt: React.FC<PostReceiptProps> = ({ messageId }) => {
+const PostReceipt: FC<PostReceiptProps> = ({ messageId }): ReactElement => {
     const seenBy = useSelector((state: RootState) => state.readReceipts.receipts[messageId] || []);
 
     return (

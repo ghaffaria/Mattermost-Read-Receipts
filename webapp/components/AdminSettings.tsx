@@ -1,6 +1,6 @@
-import React, { FC, ChangeEvent, useEffect, useState } from 'react';
+import React, { FC, ChangeEvent, ReactElement, useEffect, useState } from 'react';
 
-const AdminSettings: FC = () => {
+const AdminSettings: FC = (): ReactElement => {
     const [enableReadReceipts, setEnableReadReceipts] = useState(false);
     const [enableLogging, setEnableLogging] = useState(false);
 
