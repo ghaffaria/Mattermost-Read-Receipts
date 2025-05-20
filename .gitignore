@@ -1,1 +1,21 @@
-/.DS_Store
+# Node.js dependencies
+/node_modules
+
+# Build output
+/webapp/dist
+
+# OS-specific files
+.DS_Store
+
+# Go build artifacts
+/bin/
+/pkg/
+
+# Logs
+*.log
+
+# IDE-specific files
+.idea/
+.vscode/
+
+webapp/node_modules

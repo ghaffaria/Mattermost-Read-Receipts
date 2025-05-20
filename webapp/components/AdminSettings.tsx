@@ -1,6 +1,6 @@
-import React, {useEffect, useState} from 'react';
+import React, { FC, ChangeEvent, useEffect, useState } from 'react';
 
-const AdminSettings: React.FC = () => {
+const AdminSettings: FC = () => {
     const [enableReadReceipts, setEnableReadReceipts] = useState(false);
     const [enableLogging, setEnableLogging] = useState(false);
 
@@ -24,10 +24,22 @@ const AdminSettings: React.FC = () => {
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({[key]: value}),
+            body: JSON.stringify({ [key]: value }),
         }).catch((error) => {
             console.error('Failed to update setting:', error);
         });
+    };
+
+    const handleEnableReceipts = (e: ChangeEvent<HTMLInputElement>) => {
+        const value = e.target.checked;
+        setEnableReadReceipts(value);
+        updateSetting('enableReadReceipts', value);
+    };
+
+    const handleEnableLogging = (e: ChangeEvent<HTMLInputElement>) => {
+        const value = e.target.checked;
+        setEnableLogging(value);
+        updateSetting('enableLogging', value);
     };
 
     return (
@@ -39,11 +51,7 @@ const AdminSettings: React.FC = () => {
                     <input
                         type="checkbox"
                         checked={enableReadReceipts}
-                        onChange={(e) => {
-                            const value = e.target.checked;
-                            setEnableReadReceipts(value);
-                            updateSetting('enableReadReceipts', value);
-                        }}
+                        onChange={handleEnableReceipts}
                     />
                     Enable Read Receipts
                 </label>
@@ -54,17 +62,13 @@ const AdminSettings: React.FC = () => {
                     <input
                         type="checkbox"
                         checked={enableLogging}
-                        onChange={(e) => {
-                            const value = e.target.checked;
-                            setEnableLogging(value);
-                            updateSetting('enableLogging', value);
-                        }}
+                        onChange={handleEnableLogging}
                     />
                     Enable Logging
                 </label>
             </div>
 
-            <style jsx>{`
+            <style>{`
                 .admin-settings {
                     padding: 20px;
                 }

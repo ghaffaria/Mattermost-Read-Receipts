@@ -1,29 +1,25 @@
 import React from 'react';
-import {useSelector} from 'react-redux';
-import {RootState} from '../store';
+import { useSelector } from 'react-redux';
+import { RootState } from '../store';
 
 interface PostReceiptProps {
     messageId: string;
 }
 
-const PostReceipt: React.FC<PostReceiptProps> = ({messageId}) => {
-    // Access the Redux state to get the list of users who have seen the post.
-    const seenBy = useSelector((state: RootState) => state.readReceipt.seenBy[messageId] || []);
+const PostReceipt: React.FC<PostReceiptProps> = ({ messageId }) => {
+    const seenBy = useSelector((state: RootState) => state.readReceipts.receipts[messageId] || []);
 
     return (
         <div className="post-receipt">
-            {/* Render a tick icon */}
             <span className="tick-icon">✔</span>
 
-            {/* Show a tooltip with the list of users on hover */}
             {seenBy.length > 0 && (
                 <div className="tooltip">
                     Seen by: {seenBy.join(', ')}
                 </div>
             )}
 
-            {/* Add some basic styles */}
-            <style jsx>{`
+            <style>{`
                 .post-receipt {
                     position: relative;
                     display: inline-block;

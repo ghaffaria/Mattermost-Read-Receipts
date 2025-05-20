@@ -16,8 +16,8 @@ const readReceiptSlice = createSlice({
     name: 'readReceipt',
     initialState,
     reducers: {
-        addReadReceipt: (state, action: PayloadAction<{messageID: string; userID: string}>) => {
-            const {messageID, userID} = action.payload;
+        addReadReceipt: (state: { seenBy: Record<string, string[]> }, action: PayloadAction<{ messageID: string; userID: string }>) => {
+            const { messageID, userID } = action.payload;
             if (!state.seenBy[messageID]) {
                 state.seenBy[messageID] = [];
             }
