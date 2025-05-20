@@ -60,5 +60,6 @@ func TestHandleReadReceipt(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Result().StatusCode)
 
 	// Assert expectations for WebSocket events.
+	assert.NotZero(t, readEvent.Timestamp)
 	mockAPI.AssertExpectations(t)
 }

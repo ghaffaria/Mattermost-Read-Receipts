@@ -10,7 +10,7 @@ import (
 )
 
 // Add storeReadEvent method to ReadReceiptPlugin
-func (p *ReadReceiptPlugin) storeReadEvent(event types.ReadEvent) error {
+func (p *ReadReceiptPlugin) storeReadEvent(_ types.ReadEvent) error {
 	// Logic to store the event in the database
 	return nil
 }
