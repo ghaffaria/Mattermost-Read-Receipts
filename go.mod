@@ -4,6 +4,8 @@ go 1.20
 
 require github.com/mattermost/mattermost-server/v6 v6.7.0 // latest stable 6.x
 
+require github.com/mattn/go-sqlite3 v2.0.3+incompatible
+
 require github.com/stretchr/testify v1.7.1
 
 require (
