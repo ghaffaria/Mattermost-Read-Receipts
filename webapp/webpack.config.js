@@ -1,9 +1,11 @@
 // webapp/webpack.config.js
+
+
 const path = require('path');
 
 module.exports = {
   mode: 'production',               // optimized output
-  entry: './src/index.tsx',         // <-- if your entry file is src/index.tsx change this accordingly
+  entry: './src/index.tsx',         // entry point for the plugin
   output: {
     path: path.resolve(__dirname, 'dist'),
     filename: 'main.js',            // Mattermost expects a single bundle
@@ -21,11 +23,11 @@ module.exports = {
     ],
   },
   externals: {
-    react: 'React',
-    'react-dom': 'ReactDOM',
-    redux: 'Redux',
-    'react-redux': 'ReactRedux',
-    '@reduxjs/toolkit': 'RTK',
-  },
+  react: 'React',
+  'react-dom': 'ReactDOM',
+  redux: 'Redux',
+  'react-redux': 'ReactRedux'
+},
+
   devtool: 'source-map',
 };

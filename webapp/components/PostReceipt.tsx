@@ -12,6 +12,8 @@ interface PostReceiptProps {
 
 const PostReceipt: FC<PostReceiptProps> = ({ messageId }): ReactElement => {
     const seenBy = useSelector((state: RootState) => state.readReceipts.receipts[messageId] || []);
+    console.log('📦 PostReceipt mounted for:', messageId);
+    console.log('👁 seenBy:', seenBy);
 
     return (
         <>

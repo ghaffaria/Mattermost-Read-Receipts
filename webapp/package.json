@@ -7,7 +7,8 @@
     "watch": "webpack --watch --config webpack.config.js"
   },
   "dependencies": {
-    "@reduxjs/toolkit": "^2.1.5",
+    "@reduxjs/toolkit": "^1.9.5",
+    "lodash": "^4.17.21",
     "lodash.debounce": "^4.0.8",
     "mattermost-redux": "10.7.0",
     "react": "^18.2.0",
@@ -16,11 +17,11 @@
     "redux": "^4.2.1"
   },
   "devDependencies": {
+    "@types/lodash.debounce": "^4.0.7",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "@types/react-redux": "^7.1.34",
     "@types/redux": "3.6.31",
-    "@types/lodash.debounce": "^4.0.7",
     "ts-loader": "^9.5.0",
     "typescript": "^5.4.0",
     "webpack": "^5.90.0",

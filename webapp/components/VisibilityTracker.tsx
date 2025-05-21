@@ -11,22 +11,30 @@ interface VisibilityTrackerProps {
 const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElement => {
     const observerRef = useRef<IntersectionObserver | null>(null);
     const elementRef = useRef<HTMLDivElement | null>(null);
-    const [hasSent, setHasSent] = useState(false); // avoid re-sending
+    const [hasSent, setHasSent] = useState(false);
 
     useEffect(() => {
+        console.log(`👁️ VisibilityTracker mounted for message ID: ${messageId}`);
+
         const handleVisibilityChange = debounce((isVisible: boolean) => {
+            console.log(`🔍 Message ${messageId} visibility changed: ${isVisible}`);
             if (isVisible && !hasSent) {
+                console.log(`📤 Sending read receipt for message: ${messageId}`);
+
                 fetch('/plugins/mattermost-readreceipts/api/v1/read', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({ message_id: messageId }),
-                }).then(() => {
-                    setHasSent(true);
-                }).catch((error) => {
-                    console.error('Failed to send read receipt:', error);
-                });
+                })
+                    .then((res) => {
+                        console.log(`✅ Read receipt sent for ${messageId}, status: ${res.status}`);
+                        setHasSent(true);
+                    })
+                    .catch((error) => {
+                        console.error(`❌ Failed to send read receipt for ${messageId}:`, error);
+                    });
             }
         }, 300);
 
@@ -41,12 +49,16 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
         });
 
         if (elementRef.current) {
+            console.log(`📌 Observing DOM element for message: ${messageId}`);
             observerRef.current.observe(elementRef.current);
+        } else {
+            console.warn(`⚠️ elementRef is null for message: ${messageId}`);
         }
 
         return () => {
             if (observerRef.current && elementRef.current) {
                 observerRef.current.unobserve(elementRef.current);
+                console.log(`🧹 Unobserved element for message: ${messageId}`);
             }
             observerRef.current = null;
         };

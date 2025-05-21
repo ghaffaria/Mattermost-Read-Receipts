@@ -8,10 +8,13 @@ import {store} from './store';
 
 export default class ReadReceiptPlugin {
     initialize(registry: PluginRegistry) {
+        console.log('🧩 Registering PostReceipt component...');
+        console.log('🔌 Registering WebSocket handler for read_receipt...');
         // Register component that shows read receipt icon
         registry.registerPostTypeComponent(({post}) => (
             <PostReceipt messageId={post.id} />
         ));
+
 
         // Register WebSocket handler for receiving read_receipt events
         registry.registerWebSocketEventHandler(

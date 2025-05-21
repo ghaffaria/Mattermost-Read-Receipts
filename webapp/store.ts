@@ -15,6 +15,7 @@ const receiptSlice = createSlice({
     name: 'readReceipts',
     initialState,
     reducers: {
+        
         upsertReceipt: (
             state,
             action: PayloadAction<{ messageID: string; userID: string }>
@@ -25,7 +26,12 @@ const receiptSlice = createSlice({
             }
             if (!state.receipts[messageID].includes(userID)) {
                 state.receipts[messageID].push(userID);
-            }
+                console.log('🛠 upsertReceipt: current state =', JSON.stringify(state.receipts));
+                console.log('🛠 upsertReceipt: adding user', userID, 'to message', messageID);
+
+            }else {
+                console.log(`ℹ️ Receipt already exists: user ${userID} has already seen message ${messageID}`);
+        }
         },
     },
 });
