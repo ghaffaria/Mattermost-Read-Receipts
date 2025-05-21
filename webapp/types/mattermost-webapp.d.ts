@@ -5,3 +5,12 @@ declare module 'mattermost-webapp/plugins/registry' {
     // add more signatures if you call them
   }
 }
+
+declare module 'mattermost-webapp/plugins/registry' {
+    interface PluginRegistry {
+        registerWebSocketEventHandler: (
+            eventName: string,
+            handler: (event: MessageEvent) => void
+        ) => void;
+    }
+}
