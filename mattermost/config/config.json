@@ -580,7 +580,11 @@
         "EnableHealthCheck": true,
         "Directory": "./plugins",
         "ClientDirectory": "./client/plugins",
-        "Plugins": {},
+        "Plugins": {
+            "playbooks": {
+                "BotUserID": "akb6tzsezbr5xyg3bapjon5fhw"
+            }
+        },
         "PluginStates": {
             "com.mattermost.calls": {
                 "Enable": true
