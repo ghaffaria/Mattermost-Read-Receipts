@@ -1,22 +1,25 @@
-import {PluginRegistry} from 'mattermost-webapp/plugins/registry';
-import {Store, combineReducers, Reducer, AnyAction} from 'redux';
-import {createSlice, PayloadAction} from '@reduxjs/toolkit';
+import { PluginRegistry } from 'mattermost-webapp/plugins/registry';
+import { Store } from 'redux';
+import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 
-// Define the initial state for the read-receipt slice.
+// Define the initial state
 interface ReadReceiptState {
-    seenBy: Record<string, string[]>; // Maps message IDs to arrays of user IDs who have seen the message.
+    seenBy: Record<string, string[]>;
 }
 
 const initialState: ReadReceiptState = {
     seenBy: {},
 };
 
-// Create a Redux slice for managing read-receipt state.
+// Redux slice
 const readReceiptSlice = createSlice({
     name: 'readReceipt',
     initialState,
     reducers: {
-        addReadReceipt: (state: { seenBy: Record<string, string[]> }, action: PayloadAction<{ messageID: string; userID: string }>) => {
+        addReadReceipt: (
+            state,
+            action: PayloadAction<{ messageID: string; userID: string }>
+        ) => {
             const { messageID, userID } = action.payload;
             if (!state.seenBy[messageID]) {
                 state.seenBy[messageID] = [];
@@ -28,17 +31,17 @@ const readReceiptSlice = createSlice({
     },
 });
 
-export const {addReadReceipt} = readReceiptSlice.actions;
+export const { addReadReceipt } = readReceiptSlice.actions;
 
-// Register the plugin and integrate the Redux slice.
 export default class ReadReceiptPlugin {
     initialize(registry: PluginRegistry, store: Store) {
-        // Add the read-receipt reducer to the Redux store.
-        const rootReducer = combineReducers({
-            ...store.getState(),
-            readReceipt: readReceiptSlice.reducer,
-        });
-        store.replaceReducer(rootReducer as Reducer<any, AnyAction>);
+        // اضافه کردن reducer فقط برای بخش پلاگین
+        if ('registerReducer' in store) {
+            (store as any).registerReducer('readReceipt', readReceiptSlice.reducer);
+            console.log('✅ readReceipt reducer registered using store.registerReducer');
+        } else {
+            console.warn('⚠️ store.registerReducer not available — falling back (not recommended)');
+        }
 
         console.log('ReadReceiptPlugin initialized');
     }
