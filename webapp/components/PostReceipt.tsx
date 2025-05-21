@@ -23,7 +23,8 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement => {
     console.log('👁 seenBy:', seenBy);
 
     return (
-        <>
+        <div style={{ border: '1px dashed #ccc', padding: '2px', marginTop: '4px' }}>
+            👁️ ReadReceipt zone for {messageId}
             <VisibilityTracker messageId={messageId} />
 
             {seenBy.length > 0 && (
@@ -32,44 +33,11 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement => {
                     <div className="tooltip">
                         Seen by: {seenBy.join(', ')}
                     </div>
-
-                    <style>{`
-                        .post-receipt {
-                            position: relative;
-                            display: inline-block;
-                            margin-left: 8px;
-                        }
-
-                        .eye-icon {
-                            color: #666;
-                            cursor: pointer;
-                        }
-
-                        .tooltip {
-                            visibility: hidden;
-                            background-color: #555;
-                            color: #fff;
-                            text-align: center;
-                            border-radius: 5px;
-                            padding: 5px;
-                            position: absolute;
-                            z-index: 1;
-                            bottom: 125%;
-                            left: 50%;
-                            transform: translateX(-50%);
-                            opacity: 0;
-                            transition: opacity 0.3s;
-                        }
-
-                        .post-receipt:hover .tooltip {
-                            visibility: visible;
-                            opacity: 1;
-                        }
-                    `}</style>
                 </div>
             )}
-        </>
+        </div>
     );
 };
+
 
 export default PostReceipt;
