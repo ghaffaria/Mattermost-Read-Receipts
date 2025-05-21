@@ -25,3 +25,6 @@ dist/
 *.yml
 *.yaml
 mattermost/*
+
+*.gz
+/dist/

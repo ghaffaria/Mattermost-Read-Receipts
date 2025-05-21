@@ -32,7 +32,7 @@
         "EnablePermalinkPreviews": true,
         "RestrictLinkPreviews": "",
         "EnableTesting": false,
-        "EnableDeveloper": false,
+        "EnableDeveloper": true,
         "DeveloperFlags": "",
         "EnableClientPerformanceDebugging": false,
         "EnableOpenTracing": false,
@@ -575,12 +575,16 @@
     "ProductSettings": {},
     "PluginSettings": {
         "Enable": true,
-        "EnableUploads": false,
+        "EnableUploads": true,
         "AllowInsecureDownloadURL": false,
         "EnableHealthCheck": true,
         "Directory": "./plugins",
         "ClientDirectory": "./client/plugins",
         "Plugins": {
+            "mattermost-readreceipts": {
+                "enablelogging": true,
+                "enablereadreceipts": true
+            },
             "playbooks": {
                 "BotUserID": "akb6tzsezbr5xyg3bapjon5fhw"
             }
@@ -590,6 +594,9 @@
                 "Enable": true
             },
             "com.mattermost.nps": {
+                "Enable": true
+            },
+            "mattermost-readreceipts": {
                 "Enable": true
             },
             "playbooks": {

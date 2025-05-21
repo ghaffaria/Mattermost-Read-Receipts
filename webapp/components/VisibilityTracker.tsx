@@ -1,6 +1,5 @@
 // webapp/components/VisibilityTracker.tsx
 
-
 import React, { FC, ReactElement, useEffect, useRef, useState } from 'react';
 import debounce from 'lodash.debounce';
 
@@ -48,12 +47,15 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
             threshold: 1.0,
         });
 
-        if (elementRef.current) {
-            console.log(`📌 Observing DOM element for message: ${messageId}`);
-            observerRef.current.observe(elementRef.current);
-        } else {
-            console.warn(`⚠️ elementRef is null for message: ${messageId}`);
-        }
+        // 🔧 استفاده از setTimeout برای اطمینان از اینکه DOM آماده است
+        setTimeout(() => {
+            if (elementRef.current) {
+                console.log(`📌 Observing DOM element for message: ${messageId}`);
+                observerRef.current?.observe(elementRef.current);
+            } else {
+                console.warn(`⚠️ elementRef is null for message: ${messageId}`);
+            }
+        }, 0);
 
         return () => {
             if (observerRef.current && elementRef.current) {
@@ -64,7 +66,15 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
         };
     }, [messageId, hasSent]);
 
-    return <div ref={elementRef} data-post-id={messageId}></div>;
+    return (
+        <div
+            ref={elementRef}
+            data-post-id={messageId}
+            style={{height: '1px', width: '100%'}}
+        >
+            &nbsp;
+        </div>
+    );
 };
 
 export default VisibilityTracker;

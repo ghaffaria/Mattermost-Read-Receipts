@@ -1,17 +1,24 @@
 
 // webapp/components/PostReceipt.tsx
+// webapp/components/PostReceipt.tsx
 
 import React, { FC, ReactElement } from 'react';
 import { useSelector } from 'react-redux';
 import { RootState } from '../store';
 import VisibilityTracker from './VisibilityTracker';
 
-interface PostReceiptProps {
-    messageId: string;
+interface Post {
+    id: string;
 }
 
-const PostReceipt: FC<PostReceiptProps> = ({ messageId }): ReactElement => {
+interface PostReceiptProps {
+    post: Post;
+}
+
+const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement => {
+    const messageId = post.id;
     const seenBy = useSelector((state: RootState) => state.readReceipts.receipts[messageId] || []);
+
     console.log('📦 PostReceipt mounted for:', messageId);
     console.log('👁 seenBy:', seenBy);
 
