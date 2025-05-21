@@ -15,12 +15,16 @@ export default class ReadReceiptPlugin {
             <PostReceipt messageId={post.id} />
         ));
 
-
         // Register WebSocket handler for receiving read_receipt events
-        registry.registerWebSocketEventHandler(
-            'custom_mattermost-readreceipts_read_receipt',
-            handleWebSocketEvent(store.dispatch)
-        );
+        try {
+            registry.registerWebSocketEventHandler(
+                'custom_mattermost-readreceipts_read_receipt',
+                handleWebSocketEvent(store.dispatch)
+            );
+            console.log('✅ WebSocket handler registered successfully.');
+        } catch (error) {
+            console.error('❌ Failed to register WebSocket handler:', error);
+        }
 
         console.log('ReadReceiptPlugin initialized: component + WebSocket registered.');
     }

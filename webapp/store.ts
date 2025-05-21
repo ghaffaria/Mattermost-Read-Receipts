@@ -1,4 +1,3 @@
-
 // webapp/store.ts
 
 import { configureStore, createSlice, PayloadAction } from '@reduxjs/toolkit';
@@ -21,6 +20,9 @@ const receiptSlice = createSlice({
             action: PayloadAction<{ messageID: string; userID: string }>
         ) => {
             const { messageID, userID } = action.payload;
+            if (!state.receipts) {
+                state.receipts = {};
+            }
             if (!state.receipts[messageID]) {
                 state.receipts[messageID] = [];
             }
