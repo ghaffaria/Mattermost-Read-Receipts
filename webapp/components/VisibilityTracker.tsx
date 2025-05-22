@@ -1,9 +1,9 @@
 // webapp/components/VisibilityTracker.tsx
+
 console.log("👁️ VisibilityTracker file loaded!");
 
 import React, { FC, ReactElement, useEffect, useRef, useState } from 'react';
 import debounce from 'lodash.debounce';
-import {Client4} from 'mattermost-redux/client';
 
 interface VisibilityTrackerProps {
     messageId: string;
@@ -17,7 +17,6 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
     useEffect(() => {
         console.log('👀 [VisibilityTracker] useEffect mounted for messageId:', messageId);
 
-        // هر بار mount شدن یا تغییر messageId
         const handleVisibilityChange = debounce((isVisible: boolean) => {
             console.log(`🔍 [VisibilityTracker] ${messageId} visibility changed: ${isVisible} | hasSent=${hasSent}`);
             if (isVisible && !hasSent) {
@@ -26,7 +25,10 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
+                        'X-CSRF-Token': window.localStorage.getItem('MMCSRF') || (document.cookie.match(/MMCSRF=([^;]+)/)||[])[1] || ''
+
                     },
+                    credentials: 'same-origin', // 👈 اضافه‌شده
                     body: JSON.stringify({ message_id: messageId }),
                 })
                     .then((res) => {
@@ -48,7 +50,6 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
 
         observerRef.current = new window.IntersectionObserver(observerCallback, { threshold: 0.1 });
 
-        // اطمینان از وصل بودن به DOM
         setTimeout(() => {
             if (elementRef.current) {
                 console.log(`📌 [VisibilityTracker] Observing DOM element for messageId=${messageId}`, elementRef.current);
@@ -68,7 +69,6 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
         };
     }, [messageId, hasSent]);
 
-    // اگر خواستی دقیق‌تر placement را ببینی، می‌توانی data attributes و style را هم لاگ بگیری.
     return (
         <div
             ref={elementRef}

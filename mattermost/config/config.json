@@ -32,7 +32,7 @@
         "EnablePermalinkPreviews": true,
         "RestrictLinkPreviews": "",
         "EnableTesting": false,
-        "EnableDeveloper": true,
+        "EnableDeveloper": false,
         "DeveloperFlags": "",
         "EnableClientPerformanceDebugging": false,
         "EnableOpenTracing": false,
