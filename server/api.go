@@ -38,62 +38,68 @@ func (p *ReadReceiptPlugin) storeReadEvent(ev ReadEvent) error {
 
 // ثبت رسید خواندن پیام (POST /api/v1/read)
 func (p *ReadReceiptPlugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
-	for k, v := range r.Header {
-    p.API.LogInfo("Header", "key", k, "value", v)
-	}
+    // Log all headers
+    for k, v := range r.Header {
+    	p.API.LogInfo("[DEBUG] Header", "key", k, "value", v)
+    }
+	p.API.LogInfo("[DEBUG] Cookie Header", "cookie", r.Header.Get("Cookie"))
+	p.API.LogInfo("[DEBUG] User ID Header", "user_id", r.Header.Get("Mattermost-User-Id"))
+	p.API.LogInfo("[DEBUG] Request Body", "body", r.Body)
+	p.API.LogInfo("[DEBUG] Request URL", "url", r.URL.String())
+	p.API.LogInfo("[DEBUG] ServeHTTP called", "method", r.Method, "path", r.URL.Path)
 
-	if enableLogging {
-		p.API.LogInfo("HandleReadReceipt: Received read receipt request")
-	}
+    if enableLogging {
+        p.API.LogInfo("HandleReadReceipt: Received read receipt request")
+    }
 
-	var req ReadRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		p.API.LogError("HandleReadReceipt: Invalid request body", "error", err.Error())
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
+    var req ReadRequest
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        p.API.LogError("HandleReadReceipt: Invalid request body", "error", err.Error())
+        http.Error(w, "Invalid request body", http.StatusBadRequest)
+        return
+    }
 
-	userID := r.Header.Get("Mattermost-User-Id")
-	if userID == "" {
-		p.API.LogError("HandleReadReceipt: Unauthorized, missing user ID")
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
+    userID := r.Header.Get("Mattermost-User-Id")
+    if userID == "" {
+        p.API.LogError("HandleReadReceipt: Unauthorized, missing user ID")
+        http.Error(w, "Unauthorized", http.StatusUnauthorized)
+        return
+    }
 
-	timestamp := time.Now().Unix()
-	readEvent := ReadEvent{
-		MessageID: req.MessageID,
-		UserID:    userID,
-		Timestamp: timestamp,
-	}
+    timestamp := time.Now().Unix()
+    readEvent := ReadEvent{
+        MessageID: req.MessageID,
+        UserID:    userID,
+        Timestamp: timestamp,
+    }
 
-	if err := p.storeReadEvent(readEvent); err != nil {
-		p.API.LogError("HandleReadReceipt: Failed to store event", "error", err.Error())
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
+    if err := p.storeReadEvent(readEvent); err != nil {
+        p.API.LogError("HandleReadReceipt: Failed to store event", "error", err.Error())
+        http.Error(w, "Internal server error", http.StatusInternalServerError)
+        return
+    }
 
-	eventData := map[string]interface{}{
-		"message_id": readEvent.MessageID,
-		"user_id":    readEvent.UserID,
-		"timestamp":  readEvent.Timestamp,
-	}
+    eventData := map[string]interface{}{
+        "message_id": readEvent.MessageID,
+        "user_id":    readEvent.UserID,
+        "timestamp":  readEvent.Timestamp,
+    }
 
-	if enableLogging {
-		p.API.LogInfo("HandleReadReceipt: Publishing WebSocket event", "event", eventData)
-	}
+    if enableLogging {
+        p.API.LogInfo("HandleReadReceipt: Publishing WebSocket event", "event", eventData)
+    }
 
-	// وب‌سوکت برای بقیه کاربران ارسال می‌شود (فرستنده رو حذف می‌کنیم)
-	p.API.PublishWebSocketEvent(
-		"custom_mattermost-readreceipts_read_receipt",
-		eventData,
-		nil, // اگر بخواهی به همه broadcast شود
-		// یا به شکل زیر برای حذف فرستنده (می‌توانی یکی را انتخاب کنی)
-		// &model.WebsocketBroadcast{OmitUsers: map[string]bool{readEvent.UserID: true}},
-	)
+    // ارسال وب‌سوکت به همه (یا حذف فرستنده)
+    p.API.PublishWebSocketEvent(
+        "custom_mattermost-readreceipts_read_receipt",
+        eventData,
+        nil, // یا OmitUsers
+    )
 
-	w.WriteHeader(http.StatusNoContent)
-}
+    w.WriteHeader(http.StatusNoContent)
+    p.API.LogInfo("[Plugin] Sent 204, ending handler")
+    }
+
 
 // واکشی رسید خواندن هر پیام (GET /api/v1/receipts?message_id=...)
 func (p *ReadReceiptPlugin) HandleGetReceipts(w http.ResponseWriter, r *http.Request) {
