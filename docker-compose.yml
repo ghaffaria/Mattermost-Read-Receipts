@@ -1,0 +1,28 @@
+services:
+  db:
+    image: postgres:13
+    restart: always
+    environment:
+      POSTGRES_USER: mmuser
+      POSTGRES_PASSWORD: mostest
+      POSTGRES_DB: mattermost
+    volumes:
+      - db-volume:/var/lib/postgresql/data
+
+  app:
+    image: mattermost/mattermost-team-edition:release-9.5
+    platform: linux/amd64 
+    restart: always
+    ports:
+      - "8065:8065"
+    environment:
+      MM_SQLSETTINGS_DATASOURCE: postgres://mmuser:mostest@db:5432/mattermost?sslmode=disable&connect_timeout=10&binary_parameters=yes
+    depends_on:
+      - db
+    volumes:
+      - ./mattermost/config:/mattermost/config
+      - ./mattermost/plugins:/mattermost/plugins
+      - ./mattermost/client/plugins:/mattermost/client/plugins
+
+volumes:
+  db-volume:

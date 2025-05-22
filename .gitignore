@@ -22,8 +22,7 @@ webapp/node_modules
 
 dist/
 *.zip
-*.yml
-*.yaml
+
 mattermost/*
 
 *.gz
