@@ -59,12 +59,18 @@ func (p *ReadReceiptPlugin) HandleReadReceipt(w http.ResponseWriter, r *http.Req
         return
     }
 
-    userID := r.Header.Get("Mattermost-User-Id")
-    if userID == "" {
-        p.API.LogError("HandleReadReceipt: Unauthorized, missing user ID")
-        http.Error(w, "Unauthorized", http.StatusUnauthorized)
-        return
+  userID := r.Header.Get("Mattermost-User-Id")
+if userID == "" {
+    if c, err := r.Cookie("MMUSERID"); err == nil {
+        userID = c.Value
     }
+}
+if userID == "" {
+    p.API.LogError("HandleReadReceipt: Unauthorized, missing user ID")
+    http.Error(w, "Unauthorized", http.StatusUnauthorized)
+    return
+}
+
 
     timestamp := time.Now().Unix()
     readEvent := ReadEvent{
