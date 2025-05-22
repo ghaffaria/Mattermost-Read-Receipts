@@ -3,21 +3,23 @@
 package main
 
 import (
-	"encoding/json"
-	"net/http"
-	"time"
+    "encoding/json"
+    "net/http"
+    "time"
 
-	"github.com/arg/mattermost-readreceipts/server/types"
-	"github.com/mattermost/mattermost-server/v6/model"
+    "github.com/arg/mattermost-readreceipts/server/types"
+    "github.com/mattermost/mattermost-server/v6/model"
 )
 
-// Add storeReadEvent method to ReadReceiptPlugin
-func (p *ReadReceiptPlugin) storeReadEvent(_ types.ReadEvent) error {
-	// Logic to store the event in the database
-	return nil
+
+func (p *ReadReceiptPlugin) storeReadEvent(ev types.ReadEvent) error {
+    if enableLogging {
+        p.API.LogInfo("Storing read event (fake)", "user_id", ev.UserID, "message_id", ev.MessageID)
+    }
+    // Logic to store the event in the database (optional)
+    return nil
 }
 
-// HandleReadReceipt handles the POST /api/v1/read route.
 func (p *ReadReceiptPlugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
     if enableLogging {
         p.API.LogInfo("Received read receipt request")
@@ -48,9 +50,13 @@ func (p *ReadReceiptPlugin) HandleReadReceipt(w http.ResponseWriter, r *http.Req
     }
 
     eventData := map[string]interface{}{
-        "post_id":   readEvent.MessageID,
-        "user_id":   readEvent.UserID,
-        "timestamp": readEvent.Timestamp,
+        "message_id": readEvent.MessageID,
+        "user_id":    readEvent.UserID,
+        "timestamp":  readEvent.Timestamp,
+    }
+
+    if enableLogging {
+        p.API.LogInfo("Publishing WebSocket event", "event", eventData)
     }
 
     p.API.PublishWebSocketEvent(

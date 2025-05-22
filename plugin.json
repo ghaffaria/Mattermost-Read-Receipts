@@ -3,7 +3,7 @@
   "id": "mattermost-readreceipts",
   "name": "Read Receipts",
   "description": "WhatsApp/Telegram-style read receipts for Mattermost posts.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "min_server_version": "6.0.0",
 
   "server": {

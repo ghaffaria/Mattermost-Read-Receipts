@@ -3,60 +3,43 @@
 
 import React, { useEffect } from 'react';
 
+const injectEyes = () => {
+    document.querySelectorAll('div.post').forEach(postDiv => {
+        if (!postDiv.querySelector('.custom-read-receipt')) {
+            const receipt = document.createElement('span');
+            receipt.textContent = '👁️';
+            receipt.className = 'custom-read-receipt';
+            receipt.style.marginLeft = '8px';
+            receipt.style.color = 'blue';
+            const postBody = postDiv.querySelector('.post-message__text');
+            if (postBody) {
+                postBody.appendChild(receipt);
+            } else {
+                postDiv.appendChild(receipt);
+            }
+        }
+    });
+};
+
 const PostObserver: React.FC = () => {
     useEffect(() => {
-        console.log('🧿 [PostObserver] Effect triggered');
+        // اجرای اولیه برای پست‌های موجود
+        injectEyes();
 
-        const tryObserve = () => {
-            const container =
-                document.querySelector('.post-list__content') ||
-                document.querySelector('[data-testid="postView"]')?.parentElement;
+        const container = document.getElementById('post-list') || document.querySelector('.post-list__content');
+        if (!container) {
+            console.warn('⚠️ Post list container not found!');
+            return;
+        }
 
-            if (!container) {
-                console.warn('⚠️ Could not find post container, retrying...');
-                setTimeout(tryObserve, 500); // Retry until DOM is ready
-                return;
-            }
+        const observer = new MutationObserver(() => {
+            // هر تغییری رخ داد، مجدداً بررسی و inject کن
+            injectEyes();
+        });
 
-            console.log('👁️ Starting MutationObserver on container:', container);
+        observer.observe(container, { childList: true, subtree: true });
 
-            const observer = new MutationObserver((mutations) => {
-                mutations.forEach((mutation) => {
-                    mutation.addedNodes.forEach((node) => {
-                        if (!(node instanceof HTMLElement)) return;
-
-                        const post = node.classList.contains('post')
-                            ? node
-                            : node.querySelector('.post');
-
-                        if (post && !post.querySelector('.custom-read-receipt')) {
-                            const postId = post.getAttribute('id') || '[no-id]';
-                            console.log('👁️ New post detected:', postId);
-
-                            const receipt = document.createElement('div');
-                            receipt.className = 'custom-read-receipt';
-                            receipt.textContent = '👁️';
-                            receipt.style.marginLeft = '8px';
-                            receipt.style.display = 'inline-block';
-                            receipt.style.opacity = '0.5';
-
-                            post.appendChild(receipt);
-                        }
-                    });
-                });
-            });
-
-            observer.observe(container, { childList: true, subtree: true });
-
-            console.log('👁️ MutationObserver attached.');
-
-            return () => {
-                observer.disconnect();
-                console.log('👁️ PostObserver unmounted, observer disconnected');
-            };
-        };
-
-        tryObserve();
+        return () => observer.disconnect();
     }, []);
 
     return null;

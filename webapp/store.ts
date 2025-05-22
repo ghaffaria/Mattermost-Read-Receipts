@@ -14,7 +14,6 @@ const receiptSlice = createSlice({
     name: 'readReceipts',
     initialState,
     reducers: {
-        
         upsertReceipt: (
             state,
             action: PayloadAction<{ messageID: string; userID: string }>
@@ -22,19 +21,22 @@ const receiptSlice = createSlice({
             const { messageID, userID } = action.payload;
             if (!state.receipts) {
                 state.receipts = {};
+                console.log('🟠 [store] receipts state initialized');
             }
             if (!state.receipts[messageID]) {
                 state.receipts[messageID] = [];
+                console.log('🟠 [store] New messageID registered:', messageID);
             }
             if (!state.receipts[messageID].includes(userID)) {
                 state.receipts[messageID].push(userID);
-                console.log('🛠 upsertReceipt: current state =', JSON.stringify(state.receipts));
-                console.log('🛠 upsertReceipt: adding user', userID, 'to message', messageID);
-
-            }else {
-                console.log(`ℹ️ Receipt already exists: user ${userID} has already seen message ${messageID}`);
-        }
+                console.log('🟢 [store] upsertReceipt: user', userID, 'added to message', messageID);
+                console.log('🟢 [store] State after upsert:', JSON.stringify(state.receipts));
+            } else {
+                console.log(`ℹ️ [store] Receipt already exists: user ${userID} has already seen message ${messageID}`);
+            }
         },
+        // (اختیاری) در آینده resetReceipt
+        // resetReceipts: (state) => { state.receipts = {}; },
     },
 });
 

@@ -1,5 +1,3 @@
-
-// webapp/components/PostReceipt.tsx
 // webapp/components/PostReceipt.tsx
 
 import React, { FC, ReactElement } from 'react';
@@ -15,16 +13,25 @@ interface PostReceiptProps {
     post: Post;
 }
 
-const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement => {
-    const messageId = post.id;
-    const seenBy = useSelector((state: RootState) => state.readReceipts.receipts[messageId] || []);
+const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
+    // محافظت اگر پست نال یا بی‌اید بود
+    if (!post || !post.id) {
+        console.warn('🚫 [PostReceipt] Called with invalid post object:', post);
+        return null;
+    }
 
-    console.log('📦 PostReceipt mounted for:', messageId);
-    console.log('👁 seenBy:', seenBy);
+    const messageId = post.id;
+    // باگ بالقوه: ممکن است state یا receipts خالی باشد (در bootstrap اول پلاگین)
+    const seenBy = useSelector((state: RootState) =>
+        (state.readReceipts && state.readReceipts.receipts && state.readReceipts.receipts[messageId]) || []
+    );
+
+    console.log(`📦 [PostReceipt] Mounted for messageId=${messageId}`, post);
+    console.log('👁 [PostReceipt] seenBy:', seenBy);
 
     return (
         <div style={{ border: '1px dashed #ccc', padding: '2px', marginTop: '4px' }}>
-            👁️ ReadReceipt zone for {messageId}
+            <span>👁️ ReadReceipt zone for <b>{messageId}</b></span>
             <VisibilityTracker messageId={messageId} />
 
             {seenBy.length > 0 && (
@@ -38,6 +45,5 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement => {
         </div>
     );
 };
-
 
 export default PostReceipt;
