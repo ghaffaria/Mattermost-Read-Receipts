@@ -14,6 +14,7 @@ declare module 'mattermost-webapp/plugins/registry' {
             eventName: string,
             handler: (event: MessageEvent) => void
         ) => void;
+        
     }
 }
 
@@ -22,3 +23,5 @@ declare global {
         registerPlugin: (id: string, plugin: any) => void;
     }
 }
+
+

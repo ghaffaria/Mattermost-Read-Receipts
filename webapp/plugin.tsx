@@ -7,10 +7,14 @@ import {PluginRegistry} from 'mattermost-webapp/plugins/registry';
 import PostReceipt from './components/PostReceipt';
 import {handleWebSocketEvent} from './websocket';
 import {store} from './store';
+import ReadReceiptRootObserver from './components/ReadReceiptRootObserver';
 
 export default class ReadReceiptPlugin {
     initialize(registry: PluginRegistry) {
         console.log('🚀 [ReadReceiptPlugin] initialize() called with registry:', registry);
+        // @ts-ignore
+
+        registry.registerRootComponent(ReadReceiptRootObserver);
 
         // ثبت کامپوننت برای هر پست
         try {
