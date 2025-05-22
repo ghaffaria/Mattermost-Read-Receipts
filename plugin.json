@@ -1,14 +1,16 @@
-
 {
   "manifest_version": 2,
   "id": "mattermost-readreceipts",
   "name": "Read Receipts",
-  "description": "WhatsApp/Telegram-style read receipts for Mattermost posts.",
+  "description": "WhatsApp/Telegram-style read receipts for Mattermost posts.With Alireza Ghaffari(ARG)",
   "version": "0.1.2",
   "min_server_version": "6.0.0",
 
   "server": {
-    "executable": "plugin-linux-arm64"
+    "executables": {
+      "linux-amd64": "plugin-linux-amd64",
+      "linux-arm64": "plugin-linux-arm64"
+    }
   },
   "webapp": {
     "bundle_path": "main.js"

@@ -7,12 +7,13 @@ PLUGIN_BUNDLE = $(OUTPUT_DIR)/$(PLUGIN_ID)-$(PLUGIN_VERSION).tar.gz
 .PHONY: dist clean build-server build-webapp
 
 dist: clean build-webapp build-server
-	@echo "Building plugin bundle..."
+	@echo "Building plugin bundle (multi-arch)..."
 	mkdir -p $(OUTPUT_DIR)
 	cp plugin.json $(OUTPUT_DIR)/
 	cp webapp/dist/main.js $(OUTPUT_DIR)/
+	cp server/dist/plugin-linux-amd64 $(OUTPUT_DIR)/
 	cp server/dist/plugin-linux-arm64 $(OUTPUT_DIR)/
-	tar -czf $(PLUGIN_BUNDLE) -C $(OUTPUT_DIR) plugin.json main.js plugin-linux-arm64
+	tar -czf $(PLUGIN_BUNDLE) -C $(OUTPUT_DIR) plugin.json main.js plugin-linux-amd64 plugin-linux-arm64
 	@echo "✅ Plugin bundle created at $(PLUGIN_BUNDLE)"
 
 clean:
@@ -25,7 +26,14 @@ build-webapp:
 	@echo "Building webapp (webpack build)..."
 	cd webapp && npm run build
 
-build-server:
+build-server: build-server-amd64 build-server-arm64
+
+build-server-amd64:
+	@echo "Building server binary (plugin-linux-amd64)..."
+	cd server && mkdir -p dist && GOOS=linux GOARCH=amd64 go build -o dist/plugin-linux-amd64
+	@echo "✅ Server binary built at server/dist/plugin-linux-amd64"
+
+build-server-arm64:
 	@echo "Building server binary (plugin-linux-arm64)..."
 	cd server && mkdir -p dist && GOOS=linux GOARCH=arm64 go build -o dist/plugin-linux-arm64
 	@echo "✅ Server binary built at server/dist/plugin-linux-arm64"

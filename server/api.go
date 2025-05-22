@@ -1,5 +1,4 @@
 // server/api.go
-
 package main
 
 import (
@@ -7,13 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"time"
-
-	"github.com/arg/mattermost-readreceipts/server/types"
-	"github.com/mattermost/mattermost-server/v6/model"
 )
 
 // ذخیره یک رویداد خواندن پیام در دیتابیس (Postgres)
-func (p *ReadReceiptPlugin) storeReadEvent(ev types.ReadEvent) error {
+func (p *ReadReceiptPlugin) storeReadEvent(ev ReadEvent) error {
 	if p.DB == nil {
 		p.API.LogError("storeReadEvent: DB not initialized!")
 		return fmt.Errorf("DB not initialized")
@@ -26,7 +22,7 @@ func (p *ReadReceiptPlugin) storeReadEvent(ev types.ReadEvent) error {
 	query := `
         INSERT INTO read_events (message_id, user_id, timestamp)
         VALUES ($1, $2, $3)
-        ON CONFLICT (message_id, user_id) DO NOTHING;
+        ON CONFLICT (message_id, user_id) DO UPDATE SET timestamp = EXCLUDED.timestamp;
     `
 	result, err := p.DB.Exec(query, ev.MessageID, ev.UserID, ev.Timestamp)
 	if err != nil {
@@ -42,18 +38,22 @@ func (p *ReadReceiptPlugin) storeReadEvent(ev types.ReadEvent) error {
 
 // ثبت رسید خواندن پیام (POST /api/v1/read)
 func (p *ReadReceiptPlugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
+	for k, v := range r.Header {
+    p.API.LogInfo("Header", "key", k, "value", v)
+	}
+
 	if enableLogging {
 		p.API.LogInfo("HandleReadReceipt: Received read receipt request")
 	}
 
-	var req types.ReadRequest
+	var req ReadRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		p.API.LogError("HandleReadReceipt: Invalid request body", "error", err.Error())
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	userID := r.Header.Get("Mattermost-User-ID")
+	userID := r.Header.Get("Mattermost-User-Id")
 	if userID == "" {
 		p.API.LogError("HandleReadReceipt: Unauthorized, missing user ID")
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -61,7 +61,7 @@ func (p *ReadReceiptPlugin) HandleReadReceipt(w http.ResponseWriter, r *http.Req
 	}
 
 	timestamp := time.Now().Unix()
-	readEvent := types.ReadEvent{
+	readEvent := ReadEvent{
 		MessageID: req.MessageID,
 		UserID:    userID,
 		Timestamp: timestamp,
@@ -83,18 +83,19 @@ func (p *ReadReceiptPlugin) HandleReadReceipt(w http.ResponseWriter, r *http.Req
 		p.API.LogInfo("HandleReadReceipt: Publishing WebSocket event", "event", eventData)
 	}
 
+	// وب‌سوکت برای بقیه کاربران ارسال می‌شود (فرستنده رو حذف می‌کنیم)
 	p.API.PublishWebSocketEvent(
 		"custom_mattermost-readreceipts_read_receipt",
 		eventData,
-		&model.WebsocketBroadcast{
-			OmitUsers: map[string]bool{readEvent.UserID: true},
-		},
+		nil, // اگر بخواهی به همه broadcast شود
+		// یا به شکل زیر برای حذف فرستنده (می‌توانی یکی را انتخاب کنی)
+		// &model.WebsocketBroadcast{OmitUsers: map[string]bool{readEvent.UserID: true}},
 	)
 
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(http.StatusNoContent)
 }
 
-// واکشی رسید خواندن هر پیام (GET /api/v1/receipts?message_id=)
+// واکشی رسید خواندن هر پیام (GET /api/v1/receipts?message_id=...)
 func (p *ReadReceiptPlugin) HandleGetReceipts(w http.ResponseWriter, r *http.Request) {
 	messageID := r.URL.Query().Get("message_id")
 	if messageID == "" {

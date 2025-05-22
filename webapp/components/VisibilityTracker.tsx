@@ -3,6 +3,7 @@ console.log("👁️ VisibilityTracker file loaded!");
 
 import React, { FC, ReactElement, useEffect, useRef, useState } from 'react';
 import debounce from 'lodash.debounce';
+import {Client4} from 'mattermost-redux/client';
 
 interface VisibilityTrackerProps {
     messageId: string;
