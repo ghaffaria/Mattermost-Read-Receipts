@@ -1,12 +1,15 @@
+// go.mod
+
 module github.com/arg/mattermost-readreceipts
 
 go 1.20
 
 require github.com/mattermost/mattermost-server/v6 v6.7.0 // latest stable 6.x
 
-require github.com/mattn/go-sqlite3 v2.0.3+incompatible
-
-require github.com/stretchr/testify v1.7.1
+require (
+	github.com/lib/pq v1.10.4
+	github.com/stretchr/testify v1.7.1
+)
 
 require (
 	github.com/blang/semver v3.5.1+incompatible // indirect
@@ -27,7 +30,6 @@ require (
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.15.1 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.12 // indirect
-	github.com/lib/pq v1.10.4 // indirect
 	github.com/mattermost/go-i18n v1.11.1-0.20211013152124-5c415071e404 // indirect
 	github.com/mattermost/ldap v0.0.0-20201202150706-ee0e6284187d // indirect
 	github.com/mattermost/logr/v2 v2.0.15 // indirect

@@ -1,3 +1,5 @@
+// server/types/types.go
+
 package types
 
 // ReadEvent represents a message read event.
