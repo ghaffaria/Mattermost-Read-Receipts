@@ -1,5 +1,3 @@
-// webapp/plugin.tsx
-
 
 // webapp/plugin.tsx
 console.log("🔥 mattermost-readreceipts webapp bundle loaded!plugin.tsx!");
@@ -56,3 +54,7 @@ export default class ReadReceiptPlugin {
         console.log('⚡ [ReadReceiptPlugin] Plugin initialized: PostReceipt component + WebSocket registered.');
     }
 }
+
+// @ts-ignore
+
+window.registerPlugin && window.registerPlugin('mattermost-readreceipts', new ReadReceiptPlugin());

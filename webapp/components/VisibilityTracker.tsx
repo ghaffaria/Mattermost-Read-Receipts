@@ -1,5 +1,6 @@
 // webapp/components/VisibilityTracker.tsx
-console.log("👁️ VisibilityTracker mounted!");
+console.log("👁️ VisibilityTracker file loaded!");
+
 import React, { FC, ReactElement, useEffect, useRef, useState } from 'react';
 import debounce from 'lodash.debounce';
 
@@ -13,14 +14,13 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
     const [hasSent, setHasSent] = useState(false);
 
     useEffect(() => {
-        console.log("👀 VisibilityTracker mounted for", messageId);
+        console.log('👀 [VisibilityTracker] useEffect mounted for messageId:', messageId);
 
-        console.log(`👁️ [VisibilityTracker] Mounted for message ID: ${messageId}`);
-
+        // هر بار mount شدن یا تغییر messageId
         const handleVisibilityChange = debounce((isVisible: boolean) => {
-            console.log(`🔍 [VisibilityTracker] ${messageId} visibility changed: ${isVisible}`);
+            console.log(`🔍 [VisibilityTracker] ${messageId} visibility changed: ${isVisible} | hasSent=${hasSent}`);
             if (isVisible && !hasSent) {
-                console.log(`📤 [VisibilityTracker] Sending read receipt for message: ${messageId}`);
+                console.log(`📤 [VisibilityTracker] Ready to send read receipt for message: ${messageId}`);
                 fetch('/plugins/mattermost-readreceipts/api/v1/read', {
                     method: 'POST',
                     headers: {
@@ -40,42 +40,39 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
 
         const observerCallback: IntersectionObserverCallback = (entries) => {
             entries.forEach((entry) => {
-                console.log(`[TEST] entry.isIntersecting for message: ${messageId}:`, entry.isIntersecting, entry);
+                console.log(`[CB] [VisibilityTracker] entry.isIntersecting for messageId=${messageId}:`, entry.isIntersecting, entry);
                 handleVisibilityChange(entry.isIntersecting);
             });
         };
 
-        observerRef.current = new window.IntersectionObserver(observerCallback, {
-            threshold: 0.1,
-        });
+        observerRef.current = new window.IntersectionObserver(observerCallback, { threshold: 0.1 });
 
-        // استفاده از setTimeout جهت اطمینان از آماده بودن DOM
+        // اطمینان از وصل بودن به DOM
         setTimeout(() => {
             if (elementRef.current) {
-                console.log(`📌 [VisibilityTracker] Observing DOM element for message: ${messageId}`, elementRef.current);
+                console.log(`📌 [VisibilityTracker] Observing DOM element for messageId=${messageId}`, elementRef.current);
                 observerRef.current?.observe(elementRef.current);
             } else {
-                console.warn(`⚠️ [VisibilityTracker] elementRef is null for message: ${messageId}`);
+                console.warn(`⚠️ [VisibilityTracker] elementRef is null for messageId=${messageId}`);
             }
         }, 0);
 
         return () => {
             if (observerRef.current && elementRef.current) {
                 observerRef.current.unobserve(elementRef.current);
-                console.log(`🧹 [VisibilityTracker] Unobserved element for message: ${messageId}`);
+                console.log(`🧹 [VisibilityTracker] Unobserved element for messageId=${messageId}`);
             }
             observerRef.current?.disconnect();
             observerRef.current = null;
         };
     }, [messageId, hasSent]);
 
-    // اگر خواستی مطمئن باشی دقیقاً بعد از بدنه پیام وصل می‌شه، می‌تونی
-    // style یا placement را تغییر بدی
+    // اگر خواستی دقیق‌تر placement را ببینی، می‌توانی data attributes و style را هم لاگ بگیری.
     return (
         <div
             ref={elementRef}
             data-post-id={messageId}
-            style={{height: '1px', width: '100%'}}
+            style={{ height: '1px', width: '100%' }}
         >
             &nbsp;
         </div>
