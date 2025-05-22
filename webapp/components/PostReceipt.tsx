@@ -1,4 +1,5 @@
 // webapp/components/PostReceipt.tsx
+console.log("🔥 mattermost-readreceipts webapp bundle loaded. PostReceipt.tsx!");
 
 import React, { FC, ReactElement } from 'react';
 import { useSelector } from 'react-redux';
@@ -14,6 +15,7 @@ interface PostReceiptProps {
 }
 
 const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
+    console.log('🏷️ [PostReceipt] props.post=', post);
     // محافظت اگر پست نال یا بی‌اید بود
     if (!post || !post.id) {
         console.warn('🚫 [PostReceipt] Called with invalid post object:', post);

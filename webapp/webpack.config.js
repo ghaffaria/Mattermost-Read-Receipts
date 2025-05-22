@@ -5,7 +5,7 @@ const path = require('path');
 
 module.exports = {
   mode: 'production',               // optimized output
-  entry: './index.tsx',         // entry point for the plugin
+  entry: './plugin.tsx',         // entry point for the plugin
   output: {
     path: path.resolve(__dirname, 'dist'),
     filename: 'main.js',            // Mattermost expects a single bundle

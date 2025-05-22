@@ -1,5 +1,5 @@
+# Makefile
 PLUGIN_ID = mattermost-readreceipts
-# نسخه را فقط اینجا تغییر بده، همه جا اتوماتیک استفاده میشه!
 PLUGIN_VERSION = $(shell date +"%Y.%m.%d.%H%M")
 OUTPUT_DIR = dist
 PLUGIN_BUNDLE = $(OUTPUT_DIR)/$(PLUGIN_ID)-$(PLUGIN_VERSION).tar.gz
@@ -9,13 +9,16 @@ PLUGIN_BUNDLE = $(OUTPUT_DIR)/$(PLUGIN_ID)-$(PLUGIN_VERSION).tar.gz
 dist: clean build-webapp build-server
 	@echo "Building plugin bundle..."
 	mkdir -p $(OUTPUT_DIR)
-	tar -czf $(PLUGIN_BUNDLE) server webapp plugin.json
+	cp plugin.json $(OUTPUT_DIR)/
+	cp webapp/dist/main.js $(OUTPUT_DIR)/
+	cp server/dist/plugin-linux-arm64 $(OUTPUT_DIR)/
+	tar -czf $(PLUGIN_BUNDLE) -C $(OUTPUT_DIR) plugin.json main.js plugin-linux-arm64
 	@echo "✅ Plugin bundle created at $(PLUGIN_BUNDLE)"
 
 clean:
 	@echo "Cleaning all output directories..."
 	rm -rf $(OUTPUT_DIR)/*
-	rm -rf server/$(OUTPUT_DIR)/*
+	rm -rf server/dist/*
 	rm -rf webapp/dist/*
 
 build-webapp:

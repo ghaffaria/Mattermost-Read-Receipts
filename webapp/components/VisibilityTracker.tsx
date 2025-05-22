@@ -1,5 +1,5 @@
 // webapp/components/VisibilityTracker.tsx
-
+console.log("👁️ VisibilityTracker mounted!");
 import React, { FC, ReactElement, useEffect, useRef, useState } from 'react';
 import debounce from 'lodash.debounce';
 
@@ -13,6 +13,8 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
     const [hasSent, setHasSent] = useState(false);
 
     useEffect(() => {
+        console.log("👀 VisibilityTracker mounted for", messageId);
+
         console.log(`👁️ [VisibilityTracker] Mounted for message ID: ${messageId}`);
 
         const handleVisibilityChange = debounce((isVisible: boolean) => {
@@ -38,12 +40,13 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
 
         const observerCallback: IntersectionObserverCallback = (entries) => {
             entries.forEach((entry) => {
+                console.log(`[TEST] entry.isIntersecting for message: ${messageId}:`, entry.isIntersecting, entry);
                 handleVisibilityChange(entry.isIntersecting);
             });
         };
 
         observerRef.current = new window.IntersectionObserver(observerCallback, {
-            threshold: 1.0,
+            threshold: 0.1,
         });
 
         // استفاده از setTimeout جهت اطمینان از آماده بودن DOM

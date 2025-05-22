@@ -591,16 +591,16 @@
         },
         "PluginStates": {
             "com.mattermost.calls": {
-                "Enable": true
+                "Enable": false
             },
             "com.mattermost.nps": {
-                "Enable": true
+                "Enable": false
             },
             "mattermost-readreceipts": {
                 "Enable": true
             },
             "playbooks": {
-                "Enable": true
+                "Enable": false
             }
         },
         "EnableMarketplace": true,

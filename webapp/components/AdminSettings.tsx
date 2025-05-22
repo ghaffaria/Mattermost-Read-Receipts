@@ -1,3 +1,4 @@
+// webapp/components/AdminSettings.tsx
 import React, { FC, ChangeEvent, ReactElement, useEffect, useState } from 'react';
 
 const AdminSettings: FC = (): ReactElement => {

@@ -1,5 +1,9 @@
 // webapp/plugin.tsx
 
+
+// webapp/plugin.tsx
+console.log("🔥 mattermost-readreceipts webapp bundle loaded!plugin.tsx!");
+
 import React from 'react';
 import {PluginRegistry} from 'mattermost-webapp/plugins/registry';
 import PostReceipt from './components/PostReceipt';
@@ -8,28 +12,30 @@ import {store} from './store';
 
 export default class ReadReceiptPlugin {
     initialize(registry: PluginRegistry) {
-        console.log('🧩 [ReadReceiptPlugin] Registering PostReceipt component...');
-        console.log('🔌 [ReadReceiptPlugin] Registering WebSocket handler for read_receipt...');
+        console.log('🚀 [ReadReceiptPlugin] initialize() called with registry:', registry);
 
-        // استفاده درست از متد registerPostTypeComponent برای اضافه کردن PostReceipt به پست‌های معمولی (type: "")
+        // ثبت کامپوننت برای هر پست
         try {
-            // بسته به نسخه Mattermost ممکن است آرگومان اول را قبول کند یا فقط کامپوننت را بخواهد.
-            // اگر خطا داشتی، روش پایین (با فانکشن) را تست کن و لاگ بگیر!
             if ((registry as any).registerPostTypeComponent) {
+                console.log('🧩 [ReadReceiptPlugin] registerPostTypeComponent موجود است.');
                 (registry as any).registerPostTypeComponent(
                     (props: { post: { id: string, type: string } }) => {
-                        // فقط پست‌های معمولی را نمایش بده (type: "")
-                        if (!props.post || props.post.type !== '') {
+                        console.log('[ReadReceiptPlugin] registerPostTypeComponent called for post:', props.post);
+                        if (!props.post) {
+                            console.warn('[ReadReceiptPlugin] props.post is null or undefined!');
+                            return null;
+                        }
+                        if (props.post.type !== '') {
+                            console.log('[ReadReceiptPlugin] Skipping non-standard post type:', props.post.type, props.post.id);
                             return null;
                         }
                         console.log('[ReadReceiptPlugin] Rendering PostReceipt for post:', props.post.id);
                         return <PostReceipt post={props.post} />;
                     }
                 );
-                console.log('✅ [ReadReceiptPlugin] PostReceipt component registered for post type "".');
+                console.log('✅ [ReadReceiptPlugin] PostReceipt component registered.');
             } else {
-                // اگر متد نبود، لاگ بده
-                console.error('❌ [ReadReceiptPlugin] registerPostTypeComponent method not found in registry.');
+                console.error('❌ [ReadReceiptPlugin] registerPostTypeComponent not found!');
             }
         } catch (err) {
             console.error('❌ [ReadReceiptPlugin] Error in registerPostTypeComponent:', err);
@@ -37,6 +43,7 @@ export default class ReadReceiptPlugin {
 
         // ثبت WebSocket Event Handler
         try {
+            console.log('🔌 [ReadReceiptPlugin] Registering WebSocket handler for custom_mattermost-readreceipts_read_receipt...');
             registry.registerWebSocketEventHandler(
                 'custom_mattermost-readreceipts_read_receipt',
                 handleWebSocketEvent(store.dispatch)

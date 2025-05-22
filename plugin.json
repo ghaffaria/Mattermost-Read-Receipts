@@ -1,3 +1,4 @@
+
 {
   "manifest_version": 2,
   "id": "mattermost-readreceipts",
@@ -7,10 +8,10 @@
   "min_server_version": "6.0.0",
 
   "server": {
-    "executable": "server/dist/plugin-linux-arm64"
+    "executable": "plugin-linux-arm64"
   },
   "webapp": {
-    "bundle_path": "webapp/dist/main.js"
+    "bundle_path": "main.js"
   },
 
   "settings_schema": {
