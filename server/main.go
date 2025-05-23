@@ -6,5 +6,5 @@ import (
 )
 
 func main() {
-	plugin.ClientMain(&ReadReceiptPlugin{})
+	plugin.ClientMain(&Plugin{})
 }

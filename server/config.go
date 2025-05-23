@@ -15,7 +15,7 @@ var ReadReceiptPluginConfig = &Config{}
 var configLock = &sync.RWMutex{}
 
 // OnConfigurationChange is called when the plugin configuration changes.
-func (p *ReadReceiptPlugin) OnConfigurationChange() error {
+func (p *Plugin) OnConfigurationChange() error {
 	config := &Config{}
 
 	// Load the configuration from the System Console.

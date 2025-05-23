@@ -4,9 +4,10 @@ module github.com/arg/mattermost-readreceipts
 
 go 1.20
 
-require github.com/mattermost/mattermost-server/v6 v6.7.0 // latest stable 6.x
+require github.com/mattermost/mattermost-server/v6 v6.7.2 // latest stable 6.x
 
 require (
+	github.com/gorilla/mux v1.8.1
 	github.com/lib/pq v1.10.4
 	github.com/stretchr/testify v1.7.1
 )

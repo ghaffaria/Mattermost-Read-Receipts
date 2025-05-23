@@ -1,157 +1,91 @@
 // server/api.go
+
 package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/gorilla/mux"
+	"github.com/mattermost/mattermost-server/v6/plugin"
 )
 
-// ذخیره یک رویداد خواندن پیام در دیتابیس (Postgres)
-func (p *ReadReceiptPlugin) storeReadEvent(ev ReadEvent) error {
-	if p.DB == nil {
-		p.API.LogError("storeReadEvent: DB not initialized!")
-		return fmt.Errorf("DB not initialized")
-	}
+func (p *Plugin) ServeHTTP(c *plugin.Context, w http.ResponseWriter, r *http.Request) {
+	router := mux.NewRouter()
 
-	if enableLogging {
-		p.API.LogInfo("storeReadEvent: Storing read event", "user_id", ev.UserID, "message_id", ev.MessageID, "timestamp", ev.Timestamp)
-	}
+	// Middleware احراز هویت
+	router.Use(p.MattermostAuthorizationRequired)
 
+	apiRouter := router.PathPrefix("/api/v1").Subrouter()
+	apiRouter.HandleFunc("/read", p.HandleReadReceipt).Methods("POST")
+	apiRouter.HandleFunc("/receipts", p.HandleGetReceipts).Methods("GET")
+
+	router.ServeHTTP(w, r)
+}
+
+func (p *Plugin) MattermostAuthorizationRequired(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		userID := r.Header.Get("Mattermost-User-Id")
+		if userID == "" {
+			userID = r.Header.Get("Mattermost-User-ID")
+		}
+
+		if userID == "" {
+			p.API.LogError("Authorization failed: Missing Mattermost-User-Id header")
+			http.Error(w, "Not authorized", http.StatusUnauthorized)
+			return
+		}
+
+		p.API.LogInfo("Authorization successful", "userID", userID)
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("Mattermost-User-Id")
+	if userID == "" {
+		userID = r.Header.Get("Mattermost-User-ID")
+	}
+	if userID == "" {
+		http.Error(w, "Not authorized", http.StatusUnauthorized)
+		return
+	}
+	var req ReadRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	readEvent := ReadEvent{
+		MessageID: req.MessageID,
+		UserID:    userID,
+		Timestamp: time.Now().Unix(),
+	}
+	if err := p.storeReadEvent(readEvent); err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (p *Plugin) HandleGetReceipts(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+	w.Write([]byte("HandleGetReceipts is not yet implemented"))
+}
+
+func (p *Plugin) storeReadEvent(event ReadEvent) error {
 	query := `
-        INSERT INTO read_events (message_id, user_id, timestamp)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (message_id, user_id) DO UPDATE SET timestamp = EXCLUDED.timestamp;
+    INSERT INTO read_events (message_id, user_id, timestamp)
+    VALUES ($1, $2, $3)
+    ON CONFLICT (message_id, user_id) DO NOTHING;
     `
-	result, err := p.DB.Exec(query, ev.MessageID, ev.UserID, ev.Timestamp)
+
+	_, err := p.DB.Exec(query, event.MessageID, event.UserID, event.Timestamp)
 	if err != nil {
-		p.API.LogError("storeReadEvent: DB insert error", "error", err.Error())
+		p.API.LogError("Failed to store read event", "error", err.Error())
 		return err
 	}
-	if enableLogging {
-		rows, _ := result.RowsAffected()
-		p.API.LogInfo("storeReadEvent: Insert result", "rows_affected", rows)
-	}
+
+	p.API.LogInfo("Read event stored successfully", "message_id", event.MessageID, "user_id", event.UserID)
 	return nil
-}
-
-// ثبت رسید خواندن پیام (POST /api/v1/read)
-func (p *ReadReceiptPlugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
-    // Log all headers
-    for k, v := range r.Header {
-    	p.API.LogInfo("[DEBUG] Header", "key", k, "value", v)
-    }
-	p.API.LogInfo("[DEBUG] Cookie Header", "cookie", r.Header.Get("Cookie"))
-	p.API.LogInfo("[DEBUG] User ID Header", "user_id", r.Header.Get("Mattermost-User-Id"))
-	p.API.LogInfo("[DEBUG] Request Body", "body", r.Body)
-	p.API.LogInfo("[DEBUG] Request URL", "url", r.URL.String())
-	p.API.LogInfo("[DEBUG] ServeHTTP called", "method", r.Method, "path", r.URL.Path)
-
-    if enableLogging {
-        p.API.LogInfo("HandleReadReceipt: Received read receipt request")
-    }
-
-    var req ReadRequest
-    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-        p.API.LogError("HandleReadReceipt: Invalid request body", "error", err.Error())
-        http.Error(w, "Invalid request body", http.StatusBadRequest)
-        return
-    }
-
-  userID := r.Header.Get("Mattermost-User-Id")
-if userID == "" {
-    if c, err := r.Cookie("MMUSERID"); err == nil {
-        userID = c.Value
-    }
-}
-if userID == "" {
-    p.API.LogError("HandleReadReceipt: Unauthorized, missing user ID")
-    http.Error(w, "Unauthorized", http.StatusUnauthorized)
-    return
-}
-
-
-    timestamp := time.Now().Unix()
-    readEvent := ReadEvent{
-        MessageID: req.MessageID,
-        UserID:    userID,
-        Timestamp: timestamp,
-    }
-
-    if err := p.storeReadEvent(readEvent); err != nil {
-        p.API.LogError("HandleReadReceipt: Failed to store event", "error", err.Error())
-        http.Error(w, "Internal server error", http.StatusInternalServerError)
-        return
-    }
-
-    eventData := map[string]interface{}{
-        "message_id": readEvent.MessageID,
-        "user_id":    readEvent.UserID,
-        "timestamp":  readEvent.Timestamp,
-    }
-
-    if enableLogging {
-        p.API.LogInfo("HandleReadReceipt: Publishing WebSocket event", "event", eventData)
-    }
-
-    // ارسال وب‌سوکت به همه (یا حذف فرستنده)
-    p.API.PublishWebSocketEvent(
-        "custom_mattermost-readreceipts_read_receipt",
-        eventData,
-        nil, // یا OmitUsers
-    )
-
-    w.WriteHeader(http.StatusNoContent)
-    p.API.LogInfo("[Plugin] Sent 204, ending handler")
-    }
-
-
-// واکشی رسید خواندن هر پیام (GET /api/v1/receipts?message_id=...)
-func (p *ReadReceiptPlugin) HandleGetReceipts(w http.ResponseWriter, r *http.Request) {
-	messageID := r.URL.Query().Get("message_id")
-	if messageID == "" {
-		p.API.LogError("HandleGetReceipts: Missing message_id")
-		http.Error(w, "Missing message_id", http.StatusBadRequest)
-		return
-	}
-	if p.DB == nil {
-		p.API.LogError("HandleGetReceipts: DB not initialized!")
-		http.Error(w, "DB not initialized", http.StatusInternalServerError)
-		return
-	}
-
-	if enableLogging {
-		p.API.LogInfo("HandleGetReceipts: Querying receipts for", "message_id", messageID)
-	}
-
-	query := "SELECT user_id FROM read_events WHERE message_id = $1"
-	rows, err := p.DB.Query(query, messageID)
-	if err != nil {
-		p.API.LogError("HandleGetReceipts: DB error", "error", err.Error())
-		http.Error(w, "DB error", http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-
-	var users []string
-	for rows.Next() {
-		var userID string
-		if err := rows.Scan(&userID); err == nil {
-			users = append(users, userID)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		p.API.LogError("HandleGetReceipts: Row scan error", "error", err.Error())
-		http.Error(w, "DB error", http.StatusInternalServerError)
-		return
-	}
-
-	if enableLogging {
-		p.API.LogInfo("HandleGetReceipts: Found receipts", "users", users)
-	}
-
-	resp := map[string][]string{"seen_by": users}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
 }

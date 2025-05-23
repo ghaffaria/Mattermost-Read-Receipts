@@ -9,15 +9,20 @@ import (
 	"time"
 
 	"github.com/arg/mattermost-readreceipts/server/types"
+	"github.com/mattermost/mattermost-server/v6/plugin"
 	"github.com/mattermost/mattermost-server/v6/plugin/plugintest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
 
-// MockPlugin is a mock implementation of ReadReceiptPlugin for testing.
+// MockPlugin is a mock implementation of Plugin for testing.
 type MockPlugin struct {
-	ReadReceiptPlugin
+	Plugin
 	mock.Mock
+}
+
+func (m *MockPlugin) SetAPI(api plugin.API) {
+	m.API = api
 }
 
 func TestHandleReadReceipt(t *testing.T) {

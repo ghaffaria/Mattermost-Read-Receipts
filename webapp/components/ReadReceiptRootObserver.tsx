@@ -69,7 +69,11 @@ const ReadReceiptRootObserver: React.FC = () => {
                 // ارسال read receipt به سرور پلاگین
                 fetch('/plugins/mattermost-readreceipts/api/v1/read', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Mattermost-User-Id': window.localStorage.getItem('MMUSERID') || '',
+                        'X-CSRF-Token': document.cookie.match(/MMCSRF=([^;]+)/)?.[1] || '',
+                    },
                     body: JSON.stringify({ message_id: postId }),
                     credentials: 'same-origin', 
                 })
