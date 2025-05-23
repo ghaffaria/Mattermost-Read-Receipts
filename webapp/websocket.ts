@@ -34,6 +34,17 @@ export function handleWebSocketEvent(dispatch: Dispatch) {
                 }, 10);
 
                 console.log(`✅ [websocket] Redux updated for message ${message_id} with user ${user_id}`);
+            } else if (data.event === 'custom_mattermost-readreceipts_custom_mattermost-readreceipts_read_receipt') {
+                const { message_id, user_id } = data.data;
+
+                console.log(`📥 [websocket] Processing read receipt event: message_id=${message_id}, user_id=${user_id}`);
+
+                dispatch(upsertReceipt({
+                    messageID: message_id,
+                    userID: user_id,
+                }));
+
+                console.log(`✅ [websocket] Redux updated for message ${message_id} with user ${user_id}`);
             } else {
                 console.log(`ℹ️ [websocket] Ignored WebSocket event: ${data.event}`);
             }

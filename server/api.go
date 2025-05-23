@@ -68,8 +68,9 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Publish WebSocket event
+	p.API.LogInfo("Publishing WebSocket event", "message_id", readEvent.MessageID, "user_id", readEvent.UserID)
 	p.API.PublishWebSocketEvent(
-		"custom_mattermost-readreceipts_read_receipt",
+		"custom_mattermost-readreceipts_custom_mattermost-readreceipts_read_receipt",
 		map[string]interface{}{
 			"message_id": readEvent.MessageID,
 			"user_id":    readEvent.UserID,
