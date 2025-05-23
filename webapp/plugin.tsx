@@ -1,16 +1,18 @@
-
 // webapp/plugin.tsx
 console.log("🔥 mattermost-readreceipts webapp bundle loaded!plugin.tsx!");
 
 import React from 'react';
 import {PluginRegistry} from 'mattermost-webapp/plugins/registry';
 import PostReceipt from './components/PostReceipt';
-import {handleWebSocketEvent} from './websocket';
+import {handleWebSocketEvent, initializeWebSocket} from './websocket';
 import {store} from './store';
 import ReadReceiptRootObserver from './components/ReadReceiptRootObserver';
 
 export default class ReadReceiptPlugin {
     initialize(registry: PluginRegistry) {
+        console.log('🚀 [ReadReceiptPlugin] Initializing WebSocket connection...');
+        initializeWebSocket();
+
         console.log('🚀 [ReadReceiptPlugin] initialize() called with registry:', registry);
         // @ts-ignore
 

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/mattermost/mattermost-server/v6/model"
 	"github.com/mattermost/mattermost-server/v6/plugin"
 )
 
@@ -65,12 +66,73 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
+
+	// Publish WebSocket event
+	p.API.PublishWebSocketEvent(
+		"custom_mattermost-readreceipts_read_receipt",
+		map[string]interface{}{
+			"message_id": readEvent.MessageID,
+			"user_id":    readEvent.UserID,
+		},
+		&model.WebsocketBroadcast{
+			OmitUsers: nil, // Broadcast to all users
+		},
+	)
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (p *Plugin) HandleGetReceipts(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNotImplemented)
-	w.Write([]byte("HandleGetReceipts is not yet implemented"))
+	messageID := r.URL.Query().Get("message_id")
+	if messageID == "" {
+		http.Error(w, "Missing message_id parameter", http.StatusBadRequest)
+		return
+	}
+
+	p.API.LogInfo("Fetching read receipts for message", "message_id", messageID)
+
+	query := `
+        SELECT user_id FROM read_events WHERE message_id = $1
+    `
+
+	rows, err := p.DB.Query(query, messageID)
+	if err != nil {
+		p.API.LogError("Failed to fetch read receipts", "error", err.Error())
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var userIDs []string
+	for rows.Next() {
+		var userID string
+		if err := rows.Scan(&userID); err != nil {
+			p.API.LogError("Failed to scan row", "error", err.Error())
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		userIDs = append(userIDs, userID)
+	}
+
+	if err := rows.Err(); err != nil {
+		p.API.LogError("Error iterating rows", "error", err.Error())
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	p.API.LogInfo("Read receipts fetched successfully", "message_id", messageID, "seen_by", userIDs)
+
+	response := map[string]interface{}{
+		"message_id": messageID,
+		"seen_by":    userIDs,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		p.API.LogError("Failed to encode response", "error", err.Error())
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
 }
 
 func (p *Plugin) storeReadEvent(event ReadEvent) error {

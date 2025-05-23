@@ -42,3 +42,22 @@ export function handleWebSocketEvent(dispatch: Dispatch) {
         }
     };
 }
+
+// Listen for WebSocket events
+export function initializeWebSocket() {
+    const socket = new WebSocket('/api/v4/websocket');
+
+    socket.onmessage = handleWebSocketEvent(store.dispatch);
+
+    socket.onopen = () => {
+        console.log('🌐 [websocket] Connection established');
+    };
+
+    socket.onerror = (error) => {
+        console.error('❌ [websocket] Connection error:', error);
+    };
+
+    socket.onclose = () => {
+        console.warn('⚠️ [websocket] Connection closed');
+    };
+}
