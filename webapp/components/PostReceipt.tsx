@@ -1,6 +1,6 @@
 // webapp/components/PostReceipt.tsx
 import React, { FC, ReactElement, useEffect, useState } from 'react';
-import { getMessageReadReceipts, getUserDisplayName, updateReadReceipts } from '../store';
+import { getMessageReadReceipts, getUserDisplayName } from '../store';
 import VisibilityTracker from './VisibilityTracker';
 
 interface Post {
@@ -22,7 +22,8 @@ interface WebSocketEventData {
 const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
     console.log('🔄 [PostReceipt] Rendering:', {
         postId: post?.id,
-        hasPost: !!post
+        hasPost: !!post,
+        timestamp: new Date().toISOString()
     });
 
     if (!post?.id) {
@@ -32,136 +33,97 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
 
     const messageId = post.id;
     const [seenBy, setSeenBy] = useState<string[]>([]);
-    const currentUserId = window.localStorage.getItem('MMUSERID') || '';
+    const currentUserId = document.cookie.match(/MMUSERID=([^;]+)/)?.[1] || 
+                         window.localStorage.getItem('MMUSERID') || '';
 
     // Update local state from our store
     useEffect(() => {
         const receipts = getMessageReadReceipts(messageId);
-        console.log('📥 [PostReceipt] Loading initial receipts:', {
+        console.log('📥 [PostReceipt] Loading receipts:', {
             messageId,
             receipts,
-            currentState: seenBy
+            currentUserId,
+            timestamp: new Date().toISOString()
         });
         setSeenBy(receipts);
-    }, [messageId]);
-
-    // Fetch initial receipts from server
-    useEffect(() => {
-        const fetchReceipts = async () => {
-            try {
-                console.log(`🔍 [PostReceipt] Fetching receipts for message:`, messageId);
-                const response = await fetch(`/plugins/mattermost-readreceipts/api/v1/receipts?message_id=${messageId}`);
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    console.log(`✅ [PostReceipt] Server response:`, {
-                        messageId,
-                        data,
-                        status: response.status
-                    });
-                    
-                    const seenByUsers = data.seen_by || [];
-                    
-                    // Update both local state and store
-                    seenByUsers.forEach((userId: string) => {
-                        console.log('👤 [PostReceipt] Processing user:', {
-                            messageId,
-                            userId,
-                            displayName: getUserDisplayName(userId)
-                        });
-                        updateReadReceipts(messageId, userId);
-                    });
-                    
-                    setSeenBy(seenByUsers);
-                } else {
-                    console.error('❌ [PostReceipt] Server error:', {
-                        status: response.status,
-                        statusText: response.statusText,
-                        messageId
-                    });
-                }
-            } catch (error) {
-                console.error('❌ [PostReceipt] Fetch error:', {
-                    error,
-                    messageId
-                });
-            }
-        };
-
-        fetchReceipts();
     }, [messageId]);
 
     // Handle WebSocket events
     useEffect(() => {
         const handleWebSocketEvent = (event: Event) => {
             const customEvent = event as CustomEvent<WebSocketEventData>;
-            console.log('📡 [PostReceipt] WebSocket event received:', {
-                type: customEvent.detail.event,
-                data: customEvent.detail.data
-            });
-
             if (customEvent.detail.event === 'custom_mattermost-readreceipts_read_receipt') {
                 const { message_id, user_id } = customEvent.detail.data;
                 if (message_id === messageId) {
-                    console.log('👁️ [PostReceipt] Processing receipt:', {
+                    console.log('👁️ [PostReceipt] Receipt event:', {
                         messageId: message_id,
                         userId: user_id,
                         username: getUserDisplayName(user_id),
-                        currentSeenBy: seenBy
+                        timestamp: new Date().toISOString()
                     });
 
-                    // Update both store and local state
-                    updateReadReceipts(message_id, user_id);
-                    setSeenBy(prev => {
-                        const newState = !prev.includes(user_id) ? [...prev, user_id] : prev;
-                        console.log('✅ [PostReceipt] State updated:', {
-                            previous: prev,
-                            new: newState,
-                            changed: prev.length !== newState.length
-                        });
-                        return newState;
-                    });
-                } else {
-                    console.log('⏭️ [PostReceipt] Ignoring event for different message:', {
-                        eventMessageId: message_id,
-                        ourMessageId: messageId
-                    });
+                    setSeenBy(prev => !prev.includes(user_id) ? [...prev, user_id] : prev);
                 }
             }
         };
 
-        console.log('👂 [PostReceipt] Adding WebSocket listener for:', messageId);
+        console.log('👂 [PostReceipt] Adding WebSocket listener:', {
+            messageId,
+            timestamp: new Date().toISOString()
+        });
+        
         window.addEventListener('mattermost-websocket-event', handleWebSocketEvent as EventListener);
+        
         return () => {
-            console.log('🗑️ [PostReceipt] Removing WebSocket listener for:', messageId);
+            console.log('🗑️ [PostReceipt] Removing WebSocket listener:', {
+                messageId,
+                timestamp: new Date().toISOString()
+            });
             window.removeEventListener('mattermost-websocket-event', handleWebSocketEvent as EventListener);
         };
-    }, [messageId, seenBy]);
+    }, [messageId]);
 
     const seenByOthers = seenBy.filter(id => id !== currentUserId);
     const seenByOthersDisplay = seenByOthers.map(userId => getUserDisplayName(userId));
 
     console.log('👀 [PostReceipt] Preparing display:', {
         messageId,
-        seenBy,
         seenByOthers,
         seenByOthersDisplay,
-        currentUserId
+        currentUserId,
+        timestamp: new Date().toISOString()
     });
 
-    const content = seenByOthers.length > 0 ? (
-        <div className="post-receipt" style={{ fontSize: '12px', color: '#666' }}>
-            <span className="eye-icon">👁</span>
-            <div className="tooltip">
-                Seen by: {seenByOthersDisplay.join(', ')}
-            </div>
-        </div>
-    ) : null;
-
-    return content && (
-        <div style={{ padding: '4px', marginTop: '4px' }}>
-            <VisibilityTracker messageId={messageId} />
-            {content}
+    // Return tracker and content together
+    return (
+        <div 
+            className="post-receipt-container" 
+            data-post-id={messageId}
+            data-component="post-receipt"
+        >
+            <VisibilityTracker messageId={messageId} key={`tracker-${messageId}`} />
+            {seenByOthers.length > 0 && (
+                <div 
+                    className="post-receipt" 
+                    style={{ 
+                        fontSize: '12px', 
+                        color: '#666',
+                        padding: '4px',
+                        marginTop: '4px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                    }}
+                    data-seen-by={seenByOthers.join(',')}
+                >
+                    <span className="eye-icon" role="img" aria-label="Seen by">👁</span>
+                    <div className="tooltip" style={{
+                        display: 'inline-block'
+                    }}>
+                        Seen by: {seenByOthersDisplay.join(', ')}
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

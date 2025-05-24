@@ -17,12 +17,16 @@ services:
       - "8065:8065"
     environment:
       MM_SQLSETTINGS_DATASOURCE: postgres://mmuser:mostest@db:5432/mattermost?sslmode=disable&connect_timeout=10&binary_parameters=yes
+      MM_PLUGINSETTINGS_ENABLEUPLOADS: "true"
+      MM_PLUGINSETTINGS_ENABLE: "true"
+      MM_SERVICESETTINGS_SITEURL: "http://localhost:8065"
     depends_on:
       - db
     volumes:
       - ./mattermost/config:/mattermost/config
       - ./mattermost/plugins:/mattermost/plugins
       - ./mattermost/client/plugins:/mattermost/client/plugins
+      - ./dist:/mattermost/prepackaged_plugins:ro
 
 volumes:
   db-volume:

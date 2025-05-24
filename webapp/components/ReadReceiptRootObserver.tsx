@@ -1,5 +1,7 @@
 // webapp/components/ReadReceiptRootObserver.tsx
 import React, { useEffect } from 'react';
+import ReactDOM from 'react-dom';
+import PostReceipt from './PostReceipt';
 
 const ReadReceiptRootObserver: React.FC = () => {
     useEffect(() => {
@@ -7,13 +9,60 @@ const ReadReceiptRootObserver: React.FC = () => {
         let polling: number | null = null;
         let tries = 0;
 
+        // Handle posts that we detect
+        function handlePostNode(node: HTMLElement) {
+            const id = node.id || node.getAttribute('id') || '';
+            const postId = id.replace(/^post_/, '');
+            if (!postId) {
+                console.warn('⚠️ [RootObserver] Post node without ID:', node);
+                return;
+            }
+
+            console.log('📨 [RootObserver] Processing post:', {
+                postId,
+                nodeId: id,
+                hasReceiptContainer: node.querySelector('.post-receipt-container') !== null
+            });
+
+            // Check if we already attached a receipt
+            if (node.querySelector('.post-receipt-container')) {
+                console.log('ℹ️ [RootObserver] Receipt already attached:', postId);
+                return;
+            }
+
+            // Find or create the container for our receipt component
+            let receiptContainer = node.querySelector('.post-receipt-mount-point');
+            if (!receiptContainer) {
+                console.log('🏗️ [RootObserver] Creating receipt container for:', postId);
+                receiptContainer = document.createElement('div');
+                receiptContainer.className = 'post-receipt-mount-point';
+                
+                // Find the post message and insert after it
+                const messageContainer = node.querySelector('.post-message__text') || 
+                                      node.querySelector('.post__body');
+                if (messageContainer && messageContainer.parentNode) {
+                    messageContainer.parentNode.insertBefore(receiptContainer, messageContainer.nextSibling);
+                } else {
+                    console.warn('⚠️ [RootObserver] Could not find message container:', postId);
+                    return;
+                }
+            }
+
+            // Render our receipt component
+            console.log('🎨 [RootObserver] Rendering PostReceipt for:', postId);
+            ReactDOM.render(
+                <PostReceipt post={{ id: postId }} />,
+                receiptContainer
+            );
+        }
+
         function tryAttachObserver() {
             // Find the messages container (handle different Mattermost versions)
             const possibleSelectors = [
                 '.post-list__content',
                 '.post-list__body',
                 '.post-list',
-                '[role="main"]',
+                '[role="main"]'
             ];
             let target: Element | null = null;
             for (const sel of possibleSelectors) {
@@ -23,26 +72,30 @@ const ReadReceiptRootObserver: React.FC = () => {
 
             if (target) {
                 observer = new MutationObserver((mutations) => {
-                    for (const mutation of mutations) {
+                    mutations.forEach((mutation) => {
                         mutation.addedNodes.forEach((node) => {
-                            // If it's a post itself
-                            if (
-                                node instanceof HTMLElement &&
-                                node.matches('[data-testid="postView"]')
-                            ) {
-                                handlePostNode(node);
-                            }
-                            // Or if it contains posts
+                            // Handle both direct post nodes and containers that might contain posts
                             if (node instanceof HTMLElement) {
-                                node.querySelectorAll?.('[data-testid="postView"]').forEach((el) => {
+                                if (node.matches('[data-testid="postView"]')) {
+                                    handlePostNode(node);
+                                }
+                                // Also check for posts within this node
+                                node.querySelectorAll('[data-testid="postView"]').forEach((el) => {
                                     handlePostNode(el as HTMLElement);
                                 });
                             }
                         });
-                    }
+                    });
                 });
+                
                 observer.observe(target, { childList: true, subtree: true });
                 console.log('👀 [RootObserver] Attached to:', target);
+
+                // Also handle any existing posts
+                target.querySelectorAll('[data-testid="postView"]').forEach((node) => {
+                    handlePostNode(node as HTMLElement);
+                });
+
                 if (polling) {
                     window.clearInterval(polling);
                 }
@@ -55,15 +108,6 @@ const ReadReceiptRootObserver: React.FC = () => {
                     console.warn('⚠️ [RootObserver] No container found after 10s');
                 }
             }
-        }
-
-        // Log new posts but don't send read receipts immediately
-        function handlePostNode(node: HTMLElement) {
-            const id = node.id || node.getAttribute('id') || '';
-            const postId = id.replace(/^post_/, '');
-            if (!postId) return;
-
-            console.log('📨 [RootObserver] New post:', postId);
         }
 
         polling = window.setInterval(tryAttachObserver, 100);
