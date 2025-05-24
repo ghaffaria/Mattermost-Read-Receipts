@@ -58,6 +58,9 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid request body: unable to parse JSON", http.StatusBadRequest)
 		return
 	}
+
+	p.API.LogInfo("[API] HandleReadReceipt called, user:", userID, "messageID:", req.MessageID)
+
 	readEvent := ReadEvent{
 		MessageID: req.MessageID,
 		UserID:    userID,
@@ -81,6 +84,8 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 			OmitUsers: nil, // Broadcast to all users
 		},
 	)
+
+	p.API.LogInfo("[API] WebSocket event published", "eventData", map[string]interface{}{"message_id": readEvent.MessageID, "user_id": readEvent.UserID})
 
 	w.WriteHeader(http.StatusNoContent)
 }

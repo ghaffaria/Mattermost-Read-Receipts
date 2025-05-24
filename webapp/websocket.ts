@@ -11,14 +11,14 @@ export function handleWebSocketEvent(dispatch: Dispatch) {
         try {
             const data = JSON.parse(event.data);
             console.log('🌐 [websocket] Parsed data:', data);
+            console.log('[WebSocket] Event received:', data);
 
-            // Check if this is our plugin's event
-            if (data.event === 'custom_mattermost-readreceipts_read_receipt') {
+            if (data.event && data.event.endsWith('_read_receipt')) {
                 const { message_id, user_id } = data.data;
 
                 console.log(`📥 [websocket] Processing read receipt event: message_id=${message_id}, user_id=${user_id}`);
+                console.log('[WebSocket] Dispatching upsertReceipt:', message_id, user_id);
 
-                // Dispatch to Redux store
                 dispatch(upsertReceipt({
                     messageID: message_id,
                     userID: user_id,

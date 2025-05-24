@@ -15,6 +15,7 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
     const [hasSent, setHasSent] = useState(false);
 
     useEffect(() => {
+        console.log('[VisibilityTracker] Mounted for messageId:', messageId);
         console.log('👀 [VisibilityTracker] useEffect mounted for messageId:', messageId);
 
         const checkInitialVisibility = () => {
@@ -46,6 +47,7 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
         checkInitialVisibility();
 
         const handleVisibilityChange = debounce((isVisible: boolean) => {
+            console.log('[VisibilityTracker] Trying to send read receipt for:', messageId);
             console.log(`🔍 [VisibilityTracker] ${messageId} visibility changed: ${isVisible} | hasSent=${hasSent}`);
             if (isVisible && !hasSent) {
                 console.log(`📤 [VisibilityTracker] Ready to send read receipt for message: ${messageId}`);
@@ -60,10 +62,12 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
                     body: JSON.stringify({ message_id: messageId }),
                 })
                     .then((res) => {
+                        console.log('[VisibilityTracker] Sent read receipt for:', messageId);
                         console.log(`✅ [VisibilityTracker] Read receipt sent for ${messageId}, status: ${res.status}`);
                         setHasSent(true);
                     })
                     .catch((error) => {
+                        console.error('[VisibilityTracker] Failed to send read receipt for:', messageId, error);
                         console.error(`❌ [VisibilityTracker] Failed to send read receipt for ${messageId}:`, error);
                     });
             }

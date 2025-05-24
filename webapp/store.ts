@@ -3,7 +3,7 @@
 import { configureStore, createSlice, PayloadAction } from '@reduxjs/toolkit';
 
 interface ReadReceiptState {
-    receipts: Record<string, Set<string>>; // messageID → set of userIDs who have seen it
+    receipts: Record<string, string[]>; // messageID → array of userIDs who have seen it
 }
 
 const initialState: ReadReceiptState = {
@@ -19,18 +19,19 @@ const receiptSlice = createSlice({
             action: PayloadAction<{ messageID: string; userID: string }>
         ) => {
             const { messageID, userID } = action.payload;
+            console.log('[Redux] upsertReceipt:', messageID, userID, 'Prev state:', state.receipts[messageID]);
             if (!state.receipts) {
                 state.receipts = {};
                 console.log('🟠 [store] receipts state initialized');
             }
             if (!state.receipts[messageID]) {
-                state.receipts[messageID] = new Set();
+                state.receipts[messageID] = [];
                 console.log('🟠 [store] New messageID registered:', messageID);
             }
-            if (!state.receipts[messageID].has(userID)) {
-                state.receipts[messageID].add(userID);
+            if (!state.receipts[messageID].includes(userID)) {
+                state.receipts[messageID].push(userID);
                 console.log('🟢 [store] upsertReceipt: user', userID, 'added to message', messageID);
-                console.log('🟢 [store] State after upsert:', JSON.stringify([...state.receipts[messageID]]));
+                console.log('[Redux] State after upsert:', state.receipts[messageID]);
             } else {
                 console.log(`ℹ️ [store] Receipt already exists: user ${userID} has already seen message ${messageID}`);
             }

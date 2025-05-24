@@ -10,6 +10,7 @@ import ReadReceiptRootObserver from './components/ReadReceiptRootObserver';
 
 export default class ReadReceiptPlugin {
     initialize(registry: PluginRegistry) {
+        console.log('[PLUGIN] Initializing ReadReceiptPlugin');
         console.log('🚀 [ReadReceiptPlugin] Initializing WebSocket connection...');
         initializeWebSocket();
 
@@ -24,12 +25,14 @@ export default class ReadReceiptPlugin {
                 console.log('🧩 [ReadReceiptPlugin] registerPostTypeComponent موجود است.');
                 (registry as any).registerPostTypeComponent(
                     (props: { post: { id: string, type: string } }) => {
+                        console.log('[PLUGIN] registerPostTypeComponent called for:', props.post);
                         console.log('[ReadReceiptPlugin] registerPostTypeComponent called for post:', props.post);
                         if (!props.post) {
                             console.warn('[ReadReceiptPlugin] props.post is null or undefined!');
                             return null;
                         }
                         if (props.post.type !== '') {
+                            console.warn('[PLUGIN] Skipping post, reason:', props.post ? props.post.type : 'post missing');
                             console.log('[ReadReceiptPlugin] Skipping non-standard post type:', props.post.type, props.post.id);
                             return null;
                         }
