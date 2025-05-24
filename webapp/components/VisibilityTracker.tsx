@@ -17,6 +17,34 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
     useEffect(() => {
         console.log('👀 [VisibilityTracker] useEffect mounted for messageId:', messageId);
 
+        const checkInitialVisibility = () => {
+            if (elementRef.current) {
+                const rect = elementRef.current.getBoundingClientRect();
+                const isVisible = rect.top >= 0 && rect.bottom <= window.innerHeight;
+                if (isVisible && !hasSent) {
+                    console.log(`📤 [VisibilityTracker] Sending initial read receipt for visible message: ${messageId}`);
+                    fetch('/plugins/mattermost-readreceipts/api/v1/read', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-Token': window.localStorage.getItem('MMCSRF') || (document.cookie.match(/MMCSRF=([^;]+)/)||[])[1] || ''
+                        },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ message_id: messageId }),
+                    })
+                        .then((res) => {
+                            console.log(`✅ [VisibilityTracker] Initial read receipt sent for ${messageId}, status: ${res.status}`);
+                            setHasSent(true);
+                        })
+                        .catch((error) => {
+                            console.error(`❌ [VisibilityTracker] Failed to send initial read receipt for ${messageId}:`, error);
+                        });
+                }
+            }
+        };
+
+        checkInitialVisibility();
+
         const handleVisibilityChange = debounce((isVisible: boolean) => {
             console.log(`🔍 [VisibilityTracker] ${messageId} visibility changed: ${isVisible} | hasSent=${hasSent}`);
             if (isVisible && !hasSent) {

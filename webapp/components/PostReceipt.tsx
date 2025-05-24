@@ -30,6 +30,12 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
     const messageId = post.id;
     const [seenBy, setSeenBy] = useState<string[]>([]);
 
+    const seenByFromRedux = useSelector((state: RootState) => state.readReceipts.receipts[messageId] || []);
+
+    useEffect(() => {
+        setSeenBy(Array.from(seenByFromRedux));
+    }, [seenByFromRedux]);
+
     // وقتی این کامپوننت هر بار mount می‌شود لاگ می‌گیریم
     useEffect(() => {
         console.log(`🌀 [PostReceipt] useEffect - Mounted for messageId=${messageId}`);
@@ -58,6 +64,29 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
         fetchReceipts();
     }, [post.id]);
 
+    useEffect(() => {
+        const handleWebSocketEvent = (event: Event) => {
+            const customEvent = event as CustomEvent<{ event: string; data: { message_id: string; user_id: string } }>;
+            if (customEvent.detail.event === 'custom_mattermost-readreceipts_read_receipt') {
+                const { message_id, user_id } = customEvent.detail.data;
+                if (message_id === post.id) {
+                    setSeenBy((prevSeenBy) => {
+                        if (!prevSeenBy.includes(user_id)) {
+                            return [...prevSeenBy, user_id];
+                        }
+                        return prevSeenBy;
+                    });
+                }
+            }
+        };
+
+        window.addEventListener('mattermost-websocket-event', handleWebSocketEvent as EventListener);
+
+        return () => {
+            window.removeEventListener('mattermost-websocket-event', handleWebSocketEvent as EventListener);
+        };
+    }, [post.id]);
+
     // لاگ نهایی قبل از رندر
     console.log(`📦 [PostReceipt] About to render for messageId=${messageId} | seenBy=`, seenBy);
 
@@ -74,7 +103,7 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
                     </div>
                 </div>
             ) : (
-                <div style={{ fontSize: '12px', color: '#bbb' }}>Nobody has seen this yet.</div>
+                <div style={{ fontSize: '12px', color: '#bbb' }}>Loading read receipts...</div>
             )}
         </div>
     );

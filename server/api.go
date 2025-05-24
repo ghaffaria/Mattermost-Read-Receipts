@@ -54,7 +54,8 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 	}
 	var req ReadRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		p.API.LogError("Failed to decode request body", "error", err.Error())
+		http.Error(w, "Invalid request body: unable to parse JSON", http.StatusBadRequest)
 		return
 	}
 	readEvent := ReadEvent{
@@ -63,14 +64,15 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 		Timestamp: time.Now().Unix(),
 	}
 	if err := p.storeReadEvent(readEvent); err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		p.API.LogError("Failed to store read event", "message_id", readEvent.MessageID, "user_id", readEvent.UserID, "error", err.Error())
+		http.Error(w, "Internal server error: unable to store read event", http.StatusInternalServerError)
 		return
 	}
 
 	// Publish WebSocket event
 	p.API.LogInfo("Publishing WebSocket event", "message_id", readEvent.MessageID, "user_id", readEvent.UserID)
 	p.API.PublishWebSocketEvent(
-		"custom_mattermost-readreceipts_custom_mattermost-readreceipts_read_receipt",
+		"custom_mattermost-readreceipts_read_receipt",
 		map[string]interface{}{
 			"message_id": readEvent.MessageID,
 			"user_id":    readEvent.UserID,
@@ -98,8 +100,8 @@ func (p *Plugin) HandleGetReceipts(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := p.DB.Query(query, messageID)
 	if err != nil {
-		p.API.LogError("Failed to fetch read receipts", "error", err.Error())
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		p.API.LogError("Database query failed", "query", query, "message_id", messageID, "error", err.Error())
+		http.Error(w, "Internal server error: database query failed", http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()

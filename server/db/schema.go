@@ -33,6 +33,21 @@ func InitializeDatabase(db *sql.DB) error {
 		return err
 	}
 
+	// SQL statements to create indexes for optimizing query performance.
+	createIndexesQuery := `
+	CREATE INDEX IF NOT EXISTS idx_message_id ON read_events (message_id);
+	CREATE INDEX IF NOT EXISTS idx_user_id ON read_events (user_id);
+	`
+
+	// Execute the queries to create the indexes.
+	_, err = db.Exec(createIndexesQuery)
+	if err != nil {
+		if enableLogging {
+			log.Printf("Error creating indexes: %v", err)
+		}
+		return err
+	}
+
 	if enableLogging {
 		log.Println("Database schema initialized successfully.")
 	}
