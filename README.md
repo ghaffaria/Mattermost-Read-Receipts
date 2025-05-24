@@ -1,12 +1,16 @@
 # Mattermost Read Receipts Plugin
 
-This plugin adds read receipts functionality to Mattermost, allowing users to see who has read their messages. It includes both server-side and webapp components.
+This plugin adds WhatsApp/Telegram-style read receipts functionality to Mattermost, allowing users to see who has read their messages. It includes both server-side and webapp components with real-time visibility tracking.
 
 ## Features
 
-- Tracks message read events and stores them in the database.
-- Displays read receipts next to messages in the Mattermost webapp.
-- Configurable via the System Console.
+- Real-time visibility tracking of messages
+- Precise read receipt detection (2-second visibility threshold)
+- Database persistence of read events
+- WebSocket-based real-time updates
+- Displays read receipts next to messages in the Mattermost webapp
+- Debug endpoints for troubleshooting
+- Configurable via the System Console
 
 ## Prerequisites
 
@@ -65,6 +69,26 @@ cd Mattermost-Read-Receipts
 
 ## Development
 
+### Docker Development Environment
+
+The plugin includes a Docker-based development environment that makes it easy to get started:
+
+1. Make sure you have Docker and Docker Compose installed.
+
+2. Start the development environment:
+
+   ```bash
+   docker-compose up -d
+   ```
+
+3. Access Mattermost at `http://localhost:8065`
+
+The Docker environment includes:
+- Mattermost Team Edition server
+- PostgreSQL database
+- Auto-loading of plugin changes
+- Hot-reloading for webapp development
+
 ### Server Development
 
 1. Run `go mod tidy` to ensure all dependencies are installed.
@@ -72,6 +96,10 @@ cd Mattermost-Read-Receipts
 2. Use `go test ./...` to run the server tests.
 
 3. Use `go vet ./...` to check for code issues.
+
+4. The server includes debug endpoints for troubleshooting:
+   - `/api/v1/debug/ping`: Check API connectivity
+   - `/api/v1/debug/db`: Verify database connection and schema
 
 ### Webapp Development
 
@@ -82,6 +110,11 @@ cd Mattermost-Read-Receipts
    ```
 
 2. The webapp will automatically rebuild on file changes.
+
+3. Key components:
+   - `VisibilityTracker`: Handles message visibility detection
+   - `PostReceipt`: Manages read receipt UI
+   - `ReadReceiptRootObserver`: Coordinates receipt tracking
 
 ## Configuration
 
@@ -96,6 +129,53 @@ cd Mattermost-Read-Receipts
 - `webapp/`: Contains the React code for the webapp plugin.
 - `Makefile`: Automates the build process.
 - `README.md`: Documentation for the plugin.
+
+## Debugging
+
+### Frontend Debugging
+
+The plugin includes comprehensive debug logging that can be viewed in the browser console:
+- Visibility tracking events (👁️)
+- API request/response logs (📤/📨)
+- WebSocket events (🔌)
+- Database operations (💾)
+
+### Backend Debugging
+
+1. View server logs in Docker:
+   ```bash
+   docker-compose logs -f app
+   ```
+
+2. Check database connectivity:
+   ```bash
+   curl http://localhost:8065/plugins/mattermost-readreceipts/api/v1/debug/db
+   ```
+
+3. Verify plugin activation:
+   ```bash
+   curl http://localhost:8065/plugins/mattermost-readreceipts/api/v1/debug/ping
+   ```
+
+## Troubleshooting
+
+Common issues and solutions:
+
+1. Read receipts not appearing
+   - Check browser console for visibility tracking logs
+   - Verify API requests are being sent
+   - Check server logs for any errors
+   - Verify database connectivity with debug endpoint
+
+2. Database connection issues
+   - Ensure PostgreSQL is running (`docker-compose ps`)
+   - Check database logs (`docker-compose logs db`)
+   - Verify schema exists using debug endpoint
+
+3. Plugin not loading
+   - Check System Console → Plugin Management
+   - Verify plugin bundle is properly built
+   - Check server logs for activation errors
 
 ## Contributing
 
