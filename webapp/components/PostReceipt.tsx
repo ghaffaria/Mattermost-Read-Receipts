@@ -96,8 +96,30 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
     }, [post.id]);
 
     // لاگ نهایی قبل از رندر
+    const seenByOthers = seenBy.filter((id) => id !== currentUserId);
+
+    // Get all users from Redux state if available (Mattermost webapp stores users in state.entities.users.profiles)
+    let userMap: Record<string, any> = {};
+    try {
+        const globalStore = (window as any).store;
+        if (globalStore && globalStore.getState) {
+            const state = globalStore.getState();
+            if (state && state.entities && state.entities.users && state.entities.users.profiles) {
+                userMap = state.entities.users.profiles;
+            }
+        }
+    } catch (e) {}
+    // Helper to get display name
+    const getDisplayName = (userId: string) => {
+        const user = userMap[userId];
+        if (!user) return userId;
+        return user.nickname || user.first_name || user.username || userId;
+    };
+    const seenByOthersDisplay = seenByOthers.map(getDisplayName);
+
     console.log(`📦 [PostReceipt] About to render for messageId=${messageId} | currentUserId=${currentUserId} | seenBy=`, seenBy);
-    console.log('[PostReceipt] seenBy for messageId=', messageId, 'is', seenBy);
+    console.log('[PostReceipt] About to render. seenBy:', seenBy, 'filtered:', seenByOthers);
+
     if (seenBy.length > 0) {
         console.log('[PostReceipt] Seen by:', seenBy);
     } else {
@@ -109,11 +131,11 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
             <span>👁️ ReadReceipt zone for <b>{messageId}</b> | currentUserId: <b>{currentUserId}</b></span>
             <VisibilityTracker messageId={messageId} />
 
-            {seenBy.length > 0 ? (
+            {seenByOthers.length > 0 ? (
                 <div className="post-receipt">
                     <span className="eye-icon">👁</span>
                     <div className="tooltip">
-                        Seen by: {seenBy.map((user) => <span key={user}>{user}</span>)}
+                        Seen by: {seenByOthersDisplay.map((name, idx) => <span key={seenByOthers[idx]}>{name}</span>)}
                     </div>
                 </div>
             ) : (
