@@ -1,54 +1,84 @@
 // webapp/websocket.ts
 
 import { Dispatch } from 'redux';
-import { upsertReceipt, store } from './store';
+import { updateReadReceipts, getUserDisplayName } from './store';
 
-// Handle WebSocket events for read receipts.
 export function handleWebSocketEvent(dispatch: Dispatch) {
     return (event: MessageEvent) => {
-        console.log('🌐 [websocket] Raw event received:', event);
+        console.log('📡 [WebSocket] Raw event received:', {
+            event: event.type,
+            data: event.data,
+            origin: event.origin
+        });
 
         try {
             const data = JSON.parse(event.data);
-            console.log('🌐 [websocket] Parsed data:', data);
-            console.log('[WebSocket] Event received:', data);
+            console.log('🔍 [WebSocket] Parsed event:', {
+                type: data.event,
+                data: data.data
+            });
 
             if (data.event && data.event.endsWith('_read_receipt')) {
                 const { message_id, user_id } = data.data;
+                
+                console.log('📬 [WebSocket] Processing read receipt:', {
+                    messageId: message_id,
+                    userId: user_id,
+                    username: getUserDisplayName(user_id)
+                });
 
-                console.log(`📥 [websocket] Processing read receipt event: message_id=${message_id}, user_id=${user_id}`);
-                console.log('[WebSocket] Dispatching upsertReceipt:', message_id, user_id);
+                // Update local state
+                updateReadReceipts(message_id, user_id);
 
-                dispatch(upsertReceipt({
-                    messageID: message_id,
-                    userID: user_id,
-                }));
+                // Create custom event for components
+                const customEvent = new CustomEvent('mattermost-websocket-event', {
+                    detail: {
+                        event: 'custom_mattermost-readreceipts_read_receipt',
+                        data: { message_id, user_id }
+                    }
+                });
 
-                console.log(`✅ [websocket] Redux updated for message ${message_id} with user ${user_id}`);
+                console.log('🔔 [WebSocket] Dispatching event to components:', {
+                    event: customEvent.type,
+                    detail: customEvent.detail
+                });
+
+                window.dispatchEvent(customEvent);
             } else {
-                console.log(`ℹ️ [websocket] Ignored WebSocket event: ${data.event}`);
+                console.log('⏭️ [WebSocket] Ignoring non-receipt event:', data.event);
             }
         } catch (error: any) {
-            console.error('❌ [websocket] Failed to handle WebSocket event:', error?.stack || error);
+            console.error('❌ [WebSocket] Error handling event:', {
+                error: error.message,
+                stack: error.stack,
+                event
+            });
         }
     };
 }
 
-// Listen for WebSocket events
 export function initializeWebSocket() {
+    console.log('🌐 [WebSocket] Initializing connection...');
+    
     const socket = new WebSocket('/api/v4/websocket');
 
-    socket.onmessage = handleWebSocketEvent(store.dispatch);
-
     socket.onopen = () => {
-        console.log('🌐 [websocket] Connection established');
+        console.log('✅ [WebSocket] Connection established');
     };
 
     socket.onerror = (error) => {
-        console.error('❌ [websocket] Connection error:', error);
+        console.error('❌ [WebSocket] Connection error:', {
+            error,
+            readyState: socket.readyState
+        });
     };
 
     socket.onclose = () => {
-        console.warn('⚠️ [websocket] Connection closed');
+        console.warn('⚠️ [WebSocket] Connection closed', {
+            wasClean: socket.readyState === 3,
+            readyState: socket.readyState
+        });
     };
+
+    return socket;
 }

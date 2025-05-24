@@ -1,7 +1,5 @@
 // webapp/components/VisibilityTracker.tsx
 
-console.log("👁️ VisibilityTracker file loaded!");
-
 import React, { FC, ReactElement, useEffect, useRef, useState } from 'react';
 import debounce from 'lodash.debounce';
 
@@ -13,102 +11,95 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
     const observerRef = useRef<IntersectionObserver | null>(null);
     const elementRef = useRef<HTMLDivElement | null>(null);
     const [hasSent, setHasSent] = useState(false);
+    const [isVisible, setIsVisible] = useState(false);
+    const visibilityTimeout = useRef<number | null>(null);
+
+    const sendReadReceipt = async () => {
+        if (hasSent) return;
+
+        console.log(`📤 [VisibilityTracker] Sending read receipt for: ${messageId}`);
+        try {
+            const response = await fetch('/plugins/mattermost-readreceipts/api/v1/read', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': window.localStorage.getItem('MMCSRF') || 
+                                  (document.cookie.match(/MMCSRF=([^;]+)/)||[])[1] || ''
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ message_id: messageId }),
+            });
+
+            if (response.ok) {
+                console.log(`✅ [VisibilityTracker] Read receipt sent for ${messageId}`);
+                setHasSent(true);
+            } else {
+                throw new Error(`Server returned ${response.status}`);
+            }
+        } catch (error) {
+            console.error(`❌ [VisibilityTracker] Failed to send read receipt for ${messageId}:`, error);
+        }
+    };
+
+    const handleVisibilityChange = debounce((entries: IntersectionObserverEntry[]) => {
+        const entry = entries[0];
+        const newIsVisible = entry.isIntersecting;
+        
+        console.log(`👁️ [VisibilityTracker] ${messageId} visibility changed:`, {
+            isIntersecting: newIsVisible,
+            ratio: entry.intersectionRatio,
+            hasSent
+        });
+
+        setIsVisible(newIsVisible);
+
+        // Clear any existing timeout
+        if (visibilityTimeout.current) {
+            window.clearTimeout(visibilityTimeout.current);
+            visibilityTimeout.current = null;
+        }
+
+        // If message becomes visible and we haven't sent a receipt yet
+        if (newIsVisible && !hasSent) {
+            // Set a timeout to ensure the message is actually read (2 seconds of visibility)
+            visibilityTimeout.current = window.setTimeout(() => {
+                if (isVisible && !hasSent) {
+                    sendReadReceipt();
+                }
+            }, 2000);
+        }
+    }, 100);
 
     useEffect(() => {
-        console.log('[VisibilityTracker] Mounted for messageId:', messageId);
-        console.log('👀 [VisibilityTracker] useEffect mounted for messageId:', messageId);
-
-        const checkInitialVisibility = () => {
-            if (elementRef.current) {
-                const rect = elementRef.current.getBoundingClientRect();
-                const isVisible = rect.top >= 0 && rect.bottom <= window.innerHeight;
-                if (isVisible && !hasSent) {
-                    console.log(`📤 [VisibilityTracker] Sending initial read receipt for visible message: ${messageId}`);
-                    fetch('/plugins/mattermost-readreceipts/api/v1/read', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-CSRF-Token': window.localStorage.getItem('MMCSRF') || (document.cookie.match(/MMCSRF=([^;]+)/)||[])[1] || ''
-                        },
-                        credentials: 'same-origin',
-                        body: JSON.stringify({ message_id: messageId }),
-                    })
-                        .then((res) => {
-                            console.log(`✅ [VisibilityTracker] Initial read receipt sent for ${messageId}, status: ${res.status}`);
-                            setHasSent(true);
-                        })
-                        .catch((error) => {
-                            console.error(`❌ [VisibilityTracker] Failed to send initial read receipt for ${messageId}:`, error);
-                        });
-                }
-            }
-        };
-
-        checkInitialVisibility();
-
-        const handleVisibilityChange = debounce((isVisible: boolean) => {
-            console.log('[VisibilityTracker] Trying to send read receipt for:', messageId);
-            console.log(`🔍 [VisibilityTracker] ${messageId} visibility changed: ${isVisible} | hasSent=${hasSent}`);
-            if (isVisible && !hasSent) {
-                console.log(`📤 [VisibilityTracker] Ready to send read receipt for message: ${messageId}`);
-                fetch('/plugins/mattermost-readreceipts/api/v1/read', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-Token': window.localStorage.getItem('MMCSRF') || (document.cookie.match(/MMCSRF=([^;]+)/)||[])[1] || ''
-
-                    },
-                    credentials: 'same-origin', // 👈 اضافه‌شده
-                    body: JSON.stringify({ message_id: messageId }),
-                })
-                    .then((res) => {
-                        console.log('[VisibilityTracker] Sent read receipt for:', messageId);
-                        console.log(`✅ [VisibilityTracker] Read receipt sent for ${messageId}, status: ${res.status}`);
-                        setHasSent(true);
-                    })
-                    .catch((error) => {
-                        console.error('[VisibilityTracker] Failed to send read receipt for:', messageId, error);
-                        console.error(`❌ [VisibilityTracker] Failed to send read receipt for ${messageId}:`, error);
-                    });
-            }
-        }, 300);
-
-        const observerCallback: IntersectionObserverCallback = (entries) => {
-            entries.forEach((entry) => {
-                console.log(`[CB] [VisibilityTracker] entry.isIntersecting for messageId=${messageId}:`, entry.isIntersecting, entry);
-                handleVisibilityChange(entry.isIntersecting);
+        console.log(`🔄 [VisibilityTracker] Setting up observer for ${messageId}`);
+        
+        if (elementRef.current && !observerRef.current) {
+            observerRef.current = new IntersectionObserver(handleVisibilityChange, {
+                threshold: [0.5], // Message must be 50% visible
+                rootMargin: '0px'
             });
-        };
-
-        observerRef.current = new window.IntersectionObserver(observerCallback, { threshold: 0.1 });
-
-        setTimeout(() => {
-            if (elementRef.current) {
-                console.log(`📌 [VisibilityTracker] Observing DOM element for messageId=${messageId}`, elementRef.current);
-                observerRef.current?.observe(elementRef.current);
-            } else {
-                console.warn(`⚠️ [VisibilityTracker] elementRef is null for messageId=${messageId}`);
-            }
-        }, 0);
+            
+            observerRef.current.observe(elementRef.current);
+        }
 
         return () => {
-            if (observerRef.current && elementRef.current) {
-                observerRef.current.unobserve(elementRef.current);
-                console.log(`🧹 [VisibilityTracker] Unobserved element for messageId=${messageId}`);
+            console.log(`🧹 [VisibilityTracker] Cleaning up observer for ${messageId}`);
+            if (visibilityTimeout.current) {
+                window.clearTimeout(visibilityTimeout.current);
             }
-            observerRef.current?.disconnect();
-            observerRef.current = null;
+            if (observerRef.current) {
+                observerRef.current.disconnect();
+            }
         };
-    }, [messageId, hasSent]);
+    }, [messageId]);
 
     return (
-        <div
+        <div 
             ref={elementRef}
-            data-post-id={messageId}
-            style={{ height: '1px', width: '100%' }}
-        >
-            &nbsp;
-        </div>
+            style={{ width: '1px', height: '1px', opacity: 0 }}
+            data-testid="visibility-tracker"
+            data-message-id={messageId}
+        />
     );
 };
 

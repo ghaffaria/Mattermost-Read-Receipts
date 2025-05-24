@@ -1,69 +1,78 @@
 // webapp/plugin.tsx
-console.log("🔥 mattermost-readreceipts webapp bundle loaded!plugin.tsx!");
-
 import React from 'react';
 import {PluginRegistry} from 'mattermost-webapp/plugins/registry';
 import PostReceipt from './components/PostReceipt';
 import {handleWebSocketEvent, initializeWebSocket} from './websocket';
-import {store} from './store';
+import {setMattermostStore} from './store';
 import ReadReceiptRootObserver from './components/ReadReceiptRootObserver';
 
+declare global {
+    interface Window {
+        store: any;
+        registerPlugin?: (id: string, plugin: any) => void;
+    }
+}
+
+interface Post {
+    id: string;
+    type: string;
+}
+
+interface PostProps {
+    post: Post;
+}
+
 export default class ReadReceiptPlugin {
-    initialize(registry: PluginRegistry) {
-        console.log('[PLUGIN] Initializing ReadReceiptPlugin');
-        console.log('🚀 [ReadReceiptPlugin] Initializing WebSocket connection...');
-        initializeWebSocket();
+    initialize(registry: PluginRegistry, store: any) {
+        console.log('🔌 [ReadReceiptPlugin] Initializing...');
+        
+        // Set the Mattermost store reference for our plugin
+        setMattermostStore(store);
+        
+        // Initialize WebSocket
+        console.log('🔌 [ReadReceiptPlugin] Initializing WebSocket...');
+        const socket = initializeWebSocket();
+        socket.onmessage = handleWebSocketEvent(store.dispatch);
 
-        console.log('🚀 [ReadReceiptPlugin] initialize() called with registry:', registry);
-        // @ts-ignore
-
+        // Register root component
         registry.registerRootComponent(ReadReceiptRootObserver);
 
-        // ثبت کامپوننت برای هر پست
+        // Register post component
         try {
             if ((registry as any).registerPostTypeComponent) {
-                console.log('🧩 [ReadReceiptPlugin] registerPostTypeComponent موجود است.');
+                console.log('🧩 [ReadReceiptPlugin] Registering post component...');
                 (registry as any).registerPostTypeComponent(
-                    (props: { post: { id: string, type: string } }) => {
-                        console.log('[PLUGIN] registerPostTypeComponent called for:', props.post);
-                        console.log('[ReadReceiptPlugin] registerPostTypeComponent called for post:', props.post);
-                        if (!props.post) {
-                            console.warn('[ReadReceiptPlugin] props.post is null or undefined!');
+                    (props: PostProps) => {
+                        if (!props.post?.id || props.post.type !== '') {
                             return null;
                         }
-                        if (props.post.type !== '') {
-                            console.warn('[PLUGIN] Skipping post, reason:', props.post ? props.post.type : 'post missing');
-                            console.log('[ReadReceiptPlugin] Skipping non-standard post type:', props.post.type, props.post.id);
-                            return null;
-                        }
-                        console.log('[ReadReceiptPlugin] Rendering PostReceipt for post:', props.post.id);
+                        console.log('[ReadReceiptPlugin] Rendering for post:', props.post.id);
                         return <PostReceipt post={props.post} />;
                     }
                 );
-                console.log('✅ [ReadReceiptPlugin] PostReceipt component registered.');
-            } else {
-                console.error('❌ [ReadReceiptPlugin] registerPostTypeComponent not found!');
+                console.log('✅ [ReadReceiptPlugin] Post component registered');
             }
         } catch (err) {
             console.error('❌ [ReadReceiptPlugin] Error in registerPostTypeComponent:', err);
         }
 
-        // ثبت WebSocket Event Handler
+        // Register WebSocket handler
         try {
-            console.log('🔌 [ReadReceiptPlugin] Registering WebSocket handler for custom_mattermost-readreceipts_read_receipt...');
+            console.log('🔌 [ReadReceiptPlugin] Registering WebSocket handler...');
             registry.registerWebSocketEventHandler(
                 'custom_mattermost-readreceipts_read_receipt',
                 handleWebSocketEvent(store.dispatch)
             );
-            console.log('✅ [ReadReceiptPlugin] WebSocket handler registered successfully.');
+            console.log('✅ [ReadReceiptPlugin] WebSocket handler registered');
         } catch (error: any) {
-            console.error('❌ [ReadReceiptPlugin] Failed to register WebSocket handler:', error, error?.stack || '');
+            console.error('❌ [ReadReceiptPlugin] Failed to register WebSocket handler:', error);
         }
 
-        console.log('⚡ [ReadReceiptPlugin] Plugin initialized: PostReceipt component + WebSocket registered.');
+        console.log('✅ [ReadReceiptPlugin] Initialization complete');
     }
 }
 
-// @ts-ignore
-
-window.registerPlugin && window.registerPlugin('mattermost-readreceipts', new ReadReceiptPlugin());
+// Register plugin
+if (window.registerPlugin) {
+    window.registerPlugin('mattermost-readreceipts', new ReadReceiptPlugin());
+}
