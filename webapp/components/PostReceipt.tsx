@@ -47,7 +47,7 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
                          window.localStorage.getItem('MMUSERID') || '';
 
     // Check if this is the user's own message
-    const isOwnMessage = messageId.split(':')[0] === currentUserId;
+    const isOwnMessage = post.user_id === currentUserId;
 
     // Update local state from our store
     useEffect(() => {
@@ -147,15 +147,17 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
         timestamp: new Date().toISOString()
     });
 
+    // Always render the container for the sender to see others, but never add VisibilityTracker for own messages
     return (
         <div 
             className="post-receipt-container" 
             data-post-id={messageId}
             data-component="post-receipt"
             data-is-own-message={isOwnMessage}
+            data-author-id={post.user_id}
         >
-            {/* Only include VisibilityTracker for messages from others */}
-            {!isOwnMessage && <VisibilityTracker messageId={messageId} key={`tracker-${messageId}`} />}
+            {/* Never include VisibilityTracker for own messages */}
+            {!isOwnMessage && <VisibilityTracker messageId={messageId} postAuthorId={post.user_id} key={`tracker-${messageId}`} />}
             
             {seenByOthers.length > 0 && (
                 <div 

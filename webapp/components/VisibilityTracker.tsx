@@ -5,9 +5,10 @@ import debounce from 'lodash.debounce';
 
 interface VisibilityTrackerProps {
     messageId: string;
+    postAuthorId: string;
 }
 
-const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElement => {
+const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId, postAuthorId }): ReactElement => {
     const observerRef = useRef<IntersectionObserver | null>(null);
     const elementRef = useRef<HTMLDivElement | null>(null);
     const [hasSent, setHasSent] = useState(false);
@@ -34,11 +35,10 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
         return userId || '';
     };
 
-    const isOwnMessage = (msgId: string): boolean => {
+    const shouldTrackVisibility = (): boolean => {
         const currentUserId = getUserId();
-        // Message IDs are in format userId:timestamp
-        const messageUserId = msgId.split(':')[0];
-        return currentUserId === messageUserId;
+        // Skip tracking if this is our own message
+        return currentUserId !== postAuthorId;
     };
 
     const sendReadReceipt = async () => {
@@ -48,8 +48,12 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
         }
 
         // Don't send read receipts for own messages
-        if (isOwnMessage(messageId)) {
-            console.log(`ℹ️ [VisibilityTracker] Skipping read receipt for own message: ${messageId}`);
+        if (!shouldTrackVisibility()) {
+            console.log(`ℹ️ [VisibilityTracker] Skipping read receipt for author's own message:`, {
+                messageId,
+                postAuthorId,
+                currentUserId: getUserId()
+            });
             return;
         }
 
@@ -144,7 +148,7 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
 
     const checkVisibilityDuration = () => {
         // Don't track visibility for own messages
-        if (isOwnMessage(messageId)) {
+        if (!shouldTrackVisibility()) {
             resetVisibilityTimer();
             return;
         }
@@ -200,6 +204,16 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
     }, 100);
 
     useEffect(() => {
+        // Don't set up tracking for own messages
+        if (!shouldTrackVisibility()) {
+            console.log(`ℹ️ [VisibilityTracker] Skipping observer setup for author's message:`, {
+                messageId,
+                postAuthorId,
+                currentUserId: getUserId()
+            });
+            return;
+        }
+
         console.log(`🔄 [VisibilityTracker] Setting up observer for ${messageId}`, {
             hasExistingObserver: !!observerRef.current,
             hasElement: !!elementRef.current

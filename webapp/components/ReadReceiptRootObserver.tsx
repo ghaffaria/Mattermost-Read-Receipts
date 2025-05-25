@@ -4,6 +4,17 @@ import ReactDOM from 'react-dom';
 import PostReceipt from './PostReceipt';
 import { Post } from '../types/mattermost-webapp';
 
+const getAuthorId = (postId: string): string => {
+    const state = (window as any).store?.getState?.();
+    const post = state?.entities?.posts?.posts?.[postId];
+    console.log('🔍 [RootObserver] Getting author from store:', {
+        postId,
+        authorId: post?.user_id,
+        hasPost: !!post
+    });
+    return post?.user_id || '';
+};
+
 const ReadReceiptRootObserver: React.FC = () => {
     useEffect(() => {
         let observer: MutationObserver | null = null;
@@ -49,16 +60,16 @@ const ReadReceiptRootObserver: React.FC = () => {
                 }
             }
 
-            // Get post user_id from the post node
-            const userId = node.getAttribute('data-user-id') || node.getAttribute('data-post-user-id') || '';
+            // Get post author_id from Redux store
+            const authorId = getAuthorId(postId);
             console.log('🎨 [RootObserver] Rendering PostReceipt for:', {
                 postId,
-                userId,
-                userIdSource: userId === node.getAttribute('data-user-id') ? 'data-user-id' : 'data-post-user-id'
+                authorId,
+                source: 'redux_store'
             });
 
             ReactDOM.render(
-                <PostReceipt post={{ id: postId, user_id: userId }} />,
+                <PostReceipt post={{ id: postId, user_id: authorId }} />,
                 receiptContainer
             );
         }
