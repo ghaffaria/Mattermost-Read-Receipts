@@ -274,3 +274,116 @@ graph LR
     E -- Broadcast --> G[WebSocket]
     G --> C
 ```
+
+## Docker Development Environment
+
+This plugin includes a pre-configured Docker development environment that makes it easy to get started.
+
+### Docker Requirements
+
+- Docker Desktop
+- Docker Compose
+
+### Quick Start
+
+1. Start the development environment:
+
+   ```bash
+   docker-compose up -d
+   ```
+
+   This will start:
+   - Mattermost Team Edition (v9.5)
+   - PostgreSQL database (v13)
+
+2. Access Mattermost:
+   - Access URL: [http://localhost:8065](http://localhost:8065)
+   - First user will be created as System Admin
+   - Create a team and start using Mattermost
+
+### Environment Details
+
+The Docker environment includes:
+
+- **Mattermost Server**
+  - Port: 8065
+  - Configuration: `./mattermost/config/config.json`
+  - Plugins directory: `./mattermost/plugins`
+  - Client plugins: `./mattermost/client/plugins`
+
+- **PostgreSQL Database**
+  - User: mmuser
+  - Password: mostest
+  - Database: mattermost
+  - Connection URL: postgres://mmuser:mostest@db:5432/mattermost
+
+### Development Workflow with Docker
+
+1. Make changes to your code
+
+2. Build the plugin:
+
+   ```bash
+   make dist
+   ```
+
+3. The plugin will be automatically loaded into the Docker environment because of the volume mount:
+
+   ```yaml
+   volumes:
+     - ./dist:/mattermost/prepackaged_plugins:ro
+   ```
+
+4. Restart the Mattermost server to load changes:
+
+   ```bash
+   docker-compose restart app
+   ```
+
+### Debugging
+
+1. View server logs:
+
+   ```bash
+   docker-compose logs -f app
+   ```
+
+2. Access the database:
+
+   ```bash
+   docker-compose exec db psql -U mmuser -d mattermost
+   ```
+
+3. Check plugin status:
+   - Go to System Console > Plugins > Plugin Management
+   - Look for any error messages
+   - Enable/disable the plugin to reload
+
+### Common Docker Issues
+
+1. **Permission Problems**
+
+   ```bash
+   sudo chown -R $(id -u):$(id -g) ./mattermost
+   ```
+
+2. **Port Conflicts**
+   - Check if port 8065 is already in use
+   - Modify the port mapping in docker-compose.yml if needed
+
+3. **Database Connection Issues**
+   - Ensure the database container is running
+   - Check the connection string in Mattermost config
+   - Wait a few seconds for the database to initialize
+
+### Clean Up
+
+To remove the development environment:
+
+```bash
+# Stop containers
+docker-compose down
+
+# Remove volumes (warning: this deletes all data)
+docker-compose down -v
+```
