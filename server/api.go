@@ -332,12 +332,11 @@ func (p *Plugin) storeReadEvent(event ReadEvent) error {
 
 	// Insert or update with new timestamp
 	query := `
-        INSERT INTO read_events (message_id, user_id, timestamp) 
-        VALUES ($1, $2, $3) 
-        ON CONFLICT (message_id, user_id) 
-        DO UPDATE SET timestamp = EXCLUDED.timestamp
-        WHERE read_events.timestamp < EXCLUDED.timestamp
-    `
+	INSERT INTO read_events (message_id, user_id, timestamp)
+	VALUES ($1, $2, $3)
+	ON CONFLICT (message_id, user_id)
+	DO UPDATE SET timestamp = EXCLUDED.timestamp;
+	`
 
 	p.API.LogDebug("[DB] Storing read receipt",
 		"message_id", event.MessageID,
