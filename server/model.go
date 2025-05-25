@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// Global flag for extra logging (می‌توان از config بخوانی)
+// Global flag for extra logging 
 var enableLogging = true
 
 // ReadEvent represents a message read event in the DB.
