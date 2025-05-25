@@ -122,13 +122,37 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
         }
     };
 
+    const resetVisibilityTimer = () => {
+        if (timerRef.current) {
+            clearInterval(timerRef.current);
+            timerRef.current = null;
+        }
+        if (visibilityStartTime.current) {
+            visibilityStartTime.current = null;
+        }
+        console.log(`⏱️ [VisibilityTracker] Reset visibility timer for ${messageId}`);
+    };
+
+    const handleTabVisibilityChange = () => {
+        if (document.visibilityState !== 'visible') {
+            console.log(`👁️ [VisibilityTracker] Tab hidden, resetting timer for ${messageId}`);
+            resetVisibilityTimer();
+        } else {
+            console.log(`👁️ [VisibilityTracker] Tab visible, will restart timer if message is visible`);
+        }
+    };
+
     const checkVisibilityDuration = () => {
         // Don't track visibility for own messages
         if (isOwnMessage(messageId)) {
-            if (timerRef.current) {
-                clearInterval(timerRef.current);
-                timerRef.current = null;
-            }
+            resetVisibilityTimer();
+            return;
+        }
+
+        // Don't track if tab is not active
+        if (document.visibilityState !== 'visible') {
+            console.log(`👁️ [VisibilityTracker] Tab not active, resetting timer for ${messageId}`);
+            resetVisibilityTimer();
             return;
         }
 
@@ -140,11 +164,7 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
                     threshold: 2000
                 });
                 sendReadReceipt();
-                // Clear the timer after sending
-                if (timerRef.current) {
-                    clearInterval(timerRef.current);
-                    timerRef.current = null;
-                }
+                resetVisibilityTimer();
             }
         }
     };
@@ -152,31 +172,30 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
     const handleVisibilityChange = debounce((entries: IntersectionObserverEntry[]) => {
         const entry = entries[0];
         const isNowVisible = entry.isIntersecting && entry.intersectionRatio >= 0.5;
+        const isTabActive = document.visibilityState === 'visible';
         
         console.log(`👁️ [VisibilityTracker] Visibility changed:`, {
             messageId,
             isIntersecting: entry.isIntersecting,
             ratio: entry.intersectionRatio,
             isVisible: isNowVisible,
+            isTabActive,
             hasSent,
             visibilityStartTime: visibilityStartTime.current,
             userId: getUserId()
         });
 
-        if (isNowVisible && !visibilityStartTime.current && !hasSent) {
+        // Only start timer if both message and tab are visible
+        if (isNowVisible && isTabActive && !visibilityStartTime.current && !hasSent) {
             console.log(`⏳ [VisibilityTracker] Starting visibility timer for ${messageId}`);
             visibilityStartTime.current = Date.now();
             if (timerRef.current) {
                 clearInterval(timerRef.current);
             }
             timerRef.current = setInterval(checkVisibilityDuration, 100);
-        } else if (!isNowVisible) {
-            console.log(`⏱️ [VisibilityTracker] Resetting visibility timer for ${messageId}`);
-            visibilityStartTime.current = null;
-            if (timerRef.current) {
-                clearInterval(timerRef.current);
-                timerRef.current = null;
-            }
+        } else if (!isNowVisible || !isTabActive) {
+            console.log(`⏱️ [VisibilityTracker] Resetting visibility timer for ${messageId} (visible: ${isNowVisible}, tab active: ${isTabActive})`);
+            resetVisibilityTimer();
         }
     }, 100);
 
@@ -186,6 +205,7 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
             hasElement: !!elementRef.current
         });
         
+        // Set up visibility observer
         if (elementRef.current && !observerRef.current) {
             observerRef.current = new IntersectionObserver(handleVisibilityChange, {
                 threshold: [0.5],
@@ -196,18 +216,16 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
             console.log(`👀 [VisibilityTracker] Observer attached to element for ${messageId}`);
         }
 
+        // Set up tab visibility listener
+        document.addEventListener('visibilitychange', handleTabVisibilityChange);
+
         return () => {
-            console.log(`🧹 [VisibilityTracker] Cleaning up observer for ${messageId}`);
-            if (visibilityStartTime.current) {
-                visibilityStartTime.current = null;
-            }
+            console.log(`🧹 [VisibilityTracker] Cleaning up observers for ${messageId}`);
+            resetVisibilityTimer();
             if (observerRef.current) {
                 observerRef.current.disconnect();
             }
-            if (timerRef.current) {
-                clearInterval(timerRef.current);
-                timerRef.current = null;
-            }
+            document.removeEventListener('visibilitychange', handleTabVisibilityChange);
         };
     }, [messageId]);
 

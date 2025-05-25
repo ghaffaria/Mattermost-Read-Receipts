@@ -331,7 +331,7 @@ For issues and feature requests:
 
 ## Project Structure
 
-```
+```plaintext
 Mattermost-Read-Receipts/
 ├── server/                 # Backend Go code
 │   ├── api.go             # HTTP API endpoints

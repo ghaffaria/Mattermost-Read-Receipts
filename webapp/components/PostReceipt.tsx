@@ -39,18 +39,13 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
     // Check if this is the user's own message
     const isOwnMessage = messageId.split(':')[0] === currentUserId;
 
-    // Skip receipt handling for own messages
-    if (isOwnMessage) {
-        console.log('ℹ️ [PostReceipt] Skipping receipt tracking for own message:', messageId);
-        return null;
-    }
-
     // Update local state from our store
     useEffect(() => {
         const receipts = getMessageReadReceipts(messageId);
         console.log('📥 [PostReceipt] Loading receipts:', {
             messageId,
             receipts,
+            isOwnMessage,
             currentUserId,
             timestamp: new Date().toISOString()
         });
@@ -99,38 +94,37 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
         messageId,
         seenByOthers,
         seenByOthersDisplay,
+        isOwnMessage,
         currentUserId,
         timestamp: new Date().toISOString()
     });
 
-    // Return tracker and content together
     return (
         <div 
             className="post-receipt-container" 
             data-post-id={messageId}
             data-component="post-receipt"
+            data-is-own-message={isOwnMessage}
         >
-            <VisibilityTracker messageId={messageId} key={`tracker-${messageId}`} />
+            {/* Only include VisibilityTracker for messages from others */}
+            {!isOwnMessage && <VisibilityTracker messageId={messageId} key={`tracker-${messageId}`} />}
+            
             {seenByOthers.length > 0 && (
                 <div 
                     className="post-receipt" 
                     style={{ 
-                        fontSize: '12px', 
-                        color: '#666',
-                        padding: '4px',
-                        marginTop: '4px',
+                        fontSize: '11px', 
+                        color: 'rgba(63, 67, 80, 0.72)',
+                        padding: '4px 0',
+                        marginTop: '2px',
                         display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '4px'
+                        alignItems: 'center'
                     }}
                     data-seen-by={seenByOthers.join(',')}
                 >
-                    <span className="eye-icon" role="img" aria-label="Seen by">👁</span>
-                    <div className="tooltip" style={{
-                        display: 'inline-block'
-                    }}>
-                        Seen by: {seenByOthersDisplay.join(', ')}
-                    </div>
+                    <span className="read-receipt-text">
+                        Seen by {seenByOthersDisplay.join(', ')}
+                    </span>
                 </div>
             )}
         </div>

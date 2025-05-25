@@ -3,7 +3,9 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -117,7 +119,20 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p.API.LogInfo("[API] Storing read receipt", "message_id", req.MessageID, "user_id", userID)
+	// Fetch post to get channel ID
+	post, err := p.API.GetPost(req.MessageID)
+	if err != nil {
+		p.API.LogError("[API] Failed to fetch post",
+			"message_id", req.MessageID,
+			"error", err.Error())
+		http.Error(w, "Failed to fetch post details", http.StatusInternalServerError)
+		return
+	}
+
+	p.API.LogInfo("[API] Storing read receipt",
+		"message_id", req.MessageID,
+		"user_id", userID,
+		"channel_id", post.ChannelId)
 
 	readEvent := ReadEvent{
 		MessageID: req.MessageID,
@@ -136,9 +151,10 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 
 	p.API.LogInfo("[API] Read receipt stored successfully",
 		"message_id", readEvent.MessageID,
-		"user_id", readEvent.UserID)
+		"user_id", readEvent.UserID,
+		"channel_id", post.ChannelId)
 
-	// Broadcast WebSocket event
+	// Broadcast WebSocket event only to users in the channel
 	p.API.PublishWebSocketEvent(
 		"custom_mattermost-readreceipts_read_receipt",
 		map[string]interface{}{
@@ -146,12 +162,15 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 			"user_id":    readEvent.UserID,
 			"timestamp":  readEvent.Timestamp,
 		},
-		&model.WebsocketBroadcast{},
+		&model.WebsocketBroadcast{
+			ChannelId: post.ChannelId,
+		},
 	)
 
 	p.API.LogDebug("[API] WebSocket event published",
 		"message_id", readEvent.MessageID,
-		"user_id", readEvent.UserID)
+		"user_id", readEvent.UserID,
+		"channel_id", post.ChannelId)
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -210,32 +229,101 @@ func (p *Plugin) HandleGetReceipts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Plugin) storeReadEvent(event ReadEvent) error {
-	query := `
-		INSERT INTO read_events (message_id, user_id, timestamp) 
-		VALUES ($1, $2, $3) 
-		ON CONFLICT (message_id, user_id) 
-		DO UPDATE SET timestamp = EXCLUDED.timestamp;
-	`
+	// Input validation
+	if event.MessageID == "" || event.UserID == "" || event.Timestamp <= 0 {
+		return fmt.Errorf("invalid read event: missing required fields or invalid timestamp")
+	}
 
-	p.API.LogDebug("[DB] Executing query",
-		"message_id", event.MessageID,
-		"user_id", event.UserID)
-
-	result, err := p.DB.Exec(query, event.MessageID, event.UserID, event.Timestamp)
+	// Start transaction for consistency
+	tx, err := p.DB.Begin()
 	if err != nil {
-		return err
+		p.API.LogError("[DB] Failed to start transaction",
+			"message_id", event.MessageID,
+			"user_id", event.UserID,
+			"error", err.Error())
+		return fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback() // Will be no-op if transaction is committed
+
+	// Check if there's a more recent receipt already
+	var existingTimestamp int64
+	err = tx.QueryRow(
+		"SELECT timestamp FROM read_events WHERE message_id = $1 AND user_id = $2",
+		event.MessageID, event.UserID,
+	).Scan(&existingTimestamp)
+
+	if err == nil {
+		if existingTimestamp >= event.Timestamp {
+			// A more recent (or same) receipt already exists
+			p.API.LogDebug("[DB] Skipping older receipt",
+				"message_id", event.MessageID,
+				"user_id", event.UserID,
+				"existing_timestamp", existingTimestamp,
+				"new_timestamp", event.Timestamp)
+			return nil
+		}
+	} else if err != sql.ErrNoRows {
+		// Unexpected error checking existing receipt
+		p.API.LogError("[DB] Error checking existing receipt",
+			"message_id", event.MessageID,
+			"user_id", event.UserID,
+			"error", err.Error())
+		return fmt.Errorf("error checking existing receipt: %w", err)
+	}
+
+	// Insert or update with new timestamp
+	query := `
+        INSERT INTO read_events (message_id, user_id, timestamp) 
+        VALUES ($1, $2, $3) 
+        ON CONFLICT (message_id, user_id) 
+        DO UPDATE SET timestamp = EXCLUDED.timestamp
+        WHERE read_events.timestamp < EXCLUDED.timestamp
+    `
+
+	p.API.LogDebug("[DB] Storing read receipt",
+		"message_id", event.MessageID,
+		"user_id", event.UserID,
+		"timestamp", event.Timestamp)
+
+	result, err := tx.Exec(query, event.MessageID, event.UserID, event.Timestamp)
+	if err != nil {
+		p.API.LogError("[DB] Failed to store read receipt",
+			"message_id", event.MessageID,
+			"user_id", event.UserID,
+			"error", err.Error())
+		return fmt.Errorf("failed to store read receipt: %w", err)
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		p.API.LogError("[DB] Failed to get rows affected", "error", err.Error())
-		return err
+		p.API.LogError("[DB] Failed to get rows affected",
+			"message_id", event.MessageID,
+			"user_id", event.UserID,
+			"error", err.Error())
+		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
 
-	p.API.LogDebug("[DB] Query executed successfully",
-		"rows_affected", rowsAffected,
-		"message_id", event.MessageID,
-		"user_id", event.UserID)
+	// Commit the transaction
+	if err := tx.Commit(); err != nil {
+		p.API.LogError("[DB] Failed to commit transaction",
+			"message_id", event.MessageID,
+			"user_id", event.UserID,
+			"error", err.Error())
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	if rowsAffected > 0 {
+		p.API.LogDebug("[DB] Read receipt stored",
+			"message_id", event.MessageID,
+			"user_id", event.UserID,
+			"timestamp", event.Timestamp,
+			"rows_affected", rowsAffected)
+	} else {
+		p.API.LogDebug("[DB] No update needed (newer receipt exists)",
+			"message_id", event.MessageID,
+			"user_id", event.UserID,
+			"timestamp", event.Timestamp)
+	}
 
 	return nil
 }
