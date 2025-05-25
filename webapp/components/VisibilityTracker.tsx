@@ -34,9 +34,22 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
         return userId || '';
     };
 
+    const isOwnMessage = (msgId: string): boolean => {
+        const currentUserId = getUserId();
+        // Message IDs are in format userId:timestamp
+        const messageUserId = msgId.split(':')[0];
+        return currentUserId === messageUserId;
+    };
+
     const sendReadReceipt = async () => {
         if (hasSent) {
             console.log(`ℹ️ [VisibilityTracker] Already sent receipt for: ${messageId}`);
+            return;
+        }
+
+        // Don't send read receipts for own messages
+        if (isOwnMessage(messageId)) {
+            console.log(`ℹ️ [VisibilityTracker] Skipping read receipt for own message: ${messageId}`);
             return;
         }
 
@@ -110,6 +123,15 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
     };
 
     const checkVisibilityDuration = () => {
+        // Don't track visibility for own messages
+        if (isOwnMessage(messageId)) {
+            if (timerRef.current) {
+                clearInterval(timerRef.current);
+                timerRef.current = null;
+            }
+            return;
+        }
+
         if (visibilityStartTime.current && !hasSent) {
             const visibilityDuration = Date.now() - visibilityStartTime.current;
             if (visibilityDuration >= 2000) {
@@ -118,6 +140,7 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId }): ReactElem
                     threshold: 2000
                 });
                 sendReadReceipt();
+                // Clear the timer after sending
                 if (timerRef.current) {
                     clearInterval(timerRef.current);
                     timerRef.current = null;

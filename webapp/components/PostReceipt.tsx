@@ -36,6 +36,15 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
     const currentUserId = document.cookie.match(/MMUSERID=([^;]+)/)?.[1] || 
                          window.localStorage.getItem('MMUSERID') || '';
 
+    // Check if this is the user's own message
+    const isOwnMessage = messageId.split(':')[0] === currentUserId;
+
+    // Skip receipt handling for own messages
+    if (isOwnMessage) {
+        console.log('ℹ️ [PostReceipt] Skipping receipt tracking for own message:', messageId);
+        return null;
+    }
+
     // Update local state from our store
     useEffect(() => {
         const receipts = getMessageReadReceipts(messageId);
