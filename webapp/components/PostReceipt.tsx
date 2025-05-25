@@ -1,11 +1,9 @@
 // webapp/components/PostReceipt.tsx
 import React, { FC, ReactElement, useEffect, useState } from 'react';
-import { getMessageReadReceipts, getUserDisplayName } from '../store';
+import { getMessageReadReceipts, getUserDisplayName, RECEIPT_STORE_UPDATE } from '../store';
 import VisibilityTracker from './VisibilityTracker';
 
-interface Post {
-    id: string;
-}
+import { Post } from '../types/mattermost-webapp';
 
 interface PostReceiptProps {
     post: Post;
@@ -16,6 +14,18 @@ interface WebSocketEventData {
     data: {
         message_id: string;
         user_id: string;
+    };
+}
+
+interface StoreReceipt {
+    messageId: string;
+    users: string[];
+}
+
+interface StoreUpdateEvent extends CustomEvent {
+    detail: {
+        type: string;
+        receipts?: StoreReceipt[];
     };
 }
 
@@ -50,6 +60,40 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
             timestamp: new Date().toISOString()
         });
         setSeenBy(receipts);
+
+        // Listen for store updates
+        const handleStoreUpdate = (event: Event) => {
+            const customEvent = event as StoreUpdateEvent;
+            const { type, receipts } = customEvent.detail;
+            
+            console.log('🔄 [PostReceipt] Store update event:', {
+                type,
+                messageId,
+                hasReceipts: !!receipts,
+                timestamp: new Date().toISOString()
+            });
+
+            // If receipts are included in the event, use them directly
+            if (type === 'receipts_loaded' && receipts) {
+                const messageReceipt = receipts.find(r => r.messageId === messageId);
+                if (messageReceipt) {
+                    console.log('✨ [PostReceipt] Using receipt from event:', {
+                        messageId,
+                        users: messageReceipt.users
+                    });
+                    setSeenBy(messageReceipt.users);
+                    return;
+                }
+            }
+
+            // Fallback to getting from store
+            setSeenBy(getMessageReadReceipts(messageId));
+        };
+
+        window.addEventListener(RECEIPT_STORE_UPDATE, handleStoreUpdate);
+        return () => {
+            window.removeEventListener(RECEIPT_STORE_UPDATE, handleStoreUpdate);
+        };
     }, [messageId]);
 
     // Handle WebSocket events
@@ -87,7 +131,10 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
         };
     }, [messageId]);
 
-    const seenByOthers = seenBy.filter(id => id !== currentUserId);
+    // Filter out both current user and post author from the seen-by list
+    const seenByOthers = seenBy.filter(id => 
+        id !== currentUserId && id !== post.user_id
+    );
     const seenByOthersDisplay = seenByOthers.map(userId => getUserDisplayName(userId));
 
     console.log('👀 [PostReceipt] Preparing display:', {
@@ -95,6 +142,7 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
         seenByOthers,
         seenByOthersDisplay,
         isOwnMessage,
+        authorId: post.user_id,
         currentUserId,
         timestamp: new Date().toISOString()
     });

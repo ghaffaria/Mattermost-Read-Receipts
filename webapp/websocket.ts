@@ -1,7 +1,7 @@
 // webapp/websocket.ts
 
 import { Dispatch } from 'redux';
-import { updateReadReceipts, getUserDisplayName } from './store';
+import { updateReadReceipts, getUserDisplayName, loadInitialReceipts } from './store';
 
 export function handleWebSocketEvent(dispatch: Dispatch) {
     return (event: MessageEvent) => {
@@ -18,7 +18,18 @@ export function handleWebSocketEvent(dispatch: Dispatch) {
                 data: data.data
             });
 
-            if (data.event && data.event.endsWith('_read_receipt')) {
+            if (data.event === 'multiple_channels_viewed') {
+                const { channel_ids } = data.data;
+                if (channel_ids && Array.isArray(channel_ids)) {
+                    console.log('👀 [WebSocket] Multiple channels viewed:', channel_ids);
+                    
+                    // Load receipts for each channel
+                    Promise.all(channel_ids.map(channelId => loadInitialReceipts(channelId)))
+                        .catch(error => {
+                            console.error('❌ [WebSocket] Failed to load receipts:', error);
+                        });
+                }
+            } else if (data.event && data.event.endsWith('_read_receipt')) {
                 const { message_id, user_id } = data.data;
                 
                 console.log('📬 [WebSocket] Processing read receipt:', {

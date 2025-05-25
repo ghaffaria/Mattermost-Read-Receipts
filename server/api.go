@@ -119,20 +119,20 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch post to get channel ID
+	// Try to get the channel ID for targeted broadcast
+	var channelId string
 	post, err := p.API.GetPost(req.MessageID)
-	if err != nil {
-		p.API.LogError("[API] Failed to fetch post",
+	if err == nil {
+		channelId = post.ChannelId
+		p.API.LogInfo("[API] Processing read receipt",
+			"message_id", req.MessageID,
+			"user_id", userID,
+			"channel_id", channelId)
+	} else {
+		p.API.LogWarn("[API] GetPost failed, will broadcast globally",
 			"message_id", req.MessageID,
 			"error", err.Error())
-		http.Error(w, "Failed to fetch post details", http.StatusInternalServerError)
-		return
 	}
-
-	p.API.LogInfo("[API] Storing read receipt",
-		"message_id", req.MessageID,
-		"user_id", userID,
-		"channel_id", post.ChannelId)
 
 	readEvent := ReadEvent{
 		MessageID: req.MessageID,
@@ -145,16 +145,27 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 			"message_id", readEvent.MessageID,
 			"user_id", readEvent.UserID,
 			"error", err.Error())
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		// Return 204 instead of 500 to prevent client retries
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
-	p.API.LogInfo("[API] Read receipt stored successfully",
+	// Only log channel_id if we successfully got it
+	logFields := []interface{}{
 		"message_id", readEvent.MessageID,
 		"user_id", readEvent.UserID,
-		"channel_id", post.ChannelId)
+	}
+	if channelId != "" {
+		logFields = append(logFields, "channel_id", channelId)
+	}
+	p.API.LogInfo("[API] Read receipt stored successfully", logFields...)
 
-	// Broadcast WebSocket event only to users in the channel
+	// Broadcast WebSocket event, targeted to channel if possible
+	broadcast := &model.WebsocketBroadcast{}
+	if channelId != "" {
+		broadcast.ChannelId = channelId
+	}
+
 	p.API.PublishWebSocketEvent(
 		"custom_mattermost-readreceipts_read_receipt",
 		map[string]interface{}{
@@ -162,68 +173,116 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 			"user_id":    readEvent.UserID,
 			"timestamp":  readEvent.Timestamp,
 		},
-		&model.WebsocketBroadcast{
-			ChannelId: post.ChannelId,
-		},
+		broadcast,
 	)
 
-	p.API.LogDebug("[API] WebSocket event published",
+	broadcastType := "global"
+	if channelId != "" {
+		broadcastType = "channel"
+	}
+	p.API.LogDebug("[API] Read receipt broadcast",
 		"message_id", readEvent.MessageID,
 		"user_id", readEvent.UserID,
-		"channel_id", post.ChannelId)
+		"channel_id", channelId,
+		"broadcast_type", broadcastType)
 
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// HandleGetReceipts handles requests to get read receipts for messages in a channel
 func (p *Plugin) HandleGetReceipts(w http.ResponseWriter, r *http.Request) {
-	messageID := r.URL.Query().Get("message_id")
-	if messageID == "" {
-		http.Error(w, "Missing message_id parameter", http.StatusBadRequest)
+	// Get current user ID
+	userID := r.Header.Get("Mattermost-User-Id")
+	if userID == "" {
+		userID = r.Header.Get("Mattermost-User-ID")
+	}
+
+	// Get channel ID from query params
+	channelID := r.URL.Query().Get("channel_id")
+	if channelID == "" {
+		p.API.LogError("[API] Missing channel_id parameter")
+		http.Error(w, "Missing channel_id parameter", http.StatusBadRequest)
 		return
 	}
 
-	p.API.LogInfo("Fetching read receipts for message", "message_id", messageID)
+	p.API.LogDebug("[API] Fetching channel receipts",
+		"channel_id", channelID,
+		"user_id", userID)
 
-	query := `
-        SELECT user_id FROM read_events WHERE message_id = $1
-    `
-
-	rows, err := p.DB.Query(query, messageID)
+	// Get all messages in the channel
+	postList, err := p.API.GetPostsForChannel(channelID, 0, 100)
 	if err != nil {
-		p.API.LogError("Database query failed", "query", query, "message_id", messageID, "error", err.Error())
-		http.Error(w, "Internal server error: database query failed", http.StatusInternalServerError)
+		p.API.LogError("[API] Failed to fetch channel posts",
+			"channel_id", channelID,
+			"error", err.Error())
+		http.Error(w, "Failed to fetch channel posts", http.StatusInternalServerError)
+		return
+	}
+
+	// Get message IDs
+	messageIDs := make([]string, 0, len(postList.Posts))
+	for _, post := range postList.Posts {
+		messageIDs = append(messageIDs, post.Id)
+	}
+
+	// Build query with message IDs
+	query := `
+		SELECT message_id, user_id, timestamp 
+		FROM read_events 
+		WHERE message_id = ANY($1)
+		AND user_id != $2
+		ORDER BY timestamp DESC
+	`
+
+	// Execute query
+	rows, dbErr := p.DB.Query(query, messageIDs, userID)
+	if dbErr != nil {
+		p.API.LogError("[API] Database query failed",
+			"channel_id", channelID,
+			"error", dbErr.Error())
+		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
 
-	var userIDs []string
+	// Collect results
+	type Receipt struct {
+		MessageID string `json:"message_id"`
+		UserID    string `json:"user_id"`
+		Timestamp int64  `json:"timestamp"`
+	}
+	receipts := []Receipt{}
+
 	for rows.Next() {
-		var userID string
-		if err := rows.Scan(&userID); err != nil {
-			p.API.LogError("Failed to scan row", "error", err.Error())
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
-			return
+		var receipt Receipt
+		if scanErr := rows.Scan(&receipt.MessageID, &receipt.UserID, &receipt.Timestamp); scanErr != nil {
+			p.API.LogError("[API] Error scanning row",
+				"channel_id", channelID,
+				"error", scanErr.Error())
+			continue
 		}
-		userIDs = append(userIDs, userID)
+		receipts = append(receipts, receipt)
 	}
 
-	if err := rows.Err(); err != nil {
-		p.API.LogError("Error iterating rows", "error", err.Error())
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	if rowErr := rows.Err(); rowErr != nil {
+		p.API.LogError("[API] Error iterating rows",
+			"channel_id", channelID,
+			"error", rowErr.Error())
+		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
 
-	p.API.LogInfo("Read receipts fetched successfully", "message_id", messageID, "seen_by", userIDs)
+	p.API.LogDebug("[API] Returning receipts",
+		"channel_id", channelID,
+		"count", len(receipts))
 
-	response := map[string]interface{}{
-		"message_id": messageID,
-		"seen_by":    userIDs,
-	}
-
+	// Write response
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		p.API.LogError("Failed to encode response", "error", err.Error())
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	if err := json.NewEncoder(w).Encode(receipts); err != nil {
+		p.API.LogError("[API] Error encoding response",
+			"channel_id", channelID,
+			"error", err.Error())
+		http.Error(w, "Error encoding response", http.StatusInternalServerError)
 		return
 	}
 }

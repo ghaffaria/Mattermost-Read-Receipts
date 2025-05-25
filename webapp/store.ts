@@ -117,3 +117,88 @@ export const getUserDisplayName = (userId: string): string => {
     });
     return displayName;
 };
+
+// Custom event for store updates
+const STORE_UPDATE_EVENT = 'mattermost-readreceipts_store_update';
+
+interface Receipt {
+    message_id: string;
+    user_id: string;
+    timestamp: number;
+}
+
+export const loadInitialReceipts = async (channelId: string): Promise<void> => {
+    console.log('🔄 [Store] Loading receipts for channel:', channelId);
+    
+    try {
+        // Fetch receipts from API
+        const response = await fetch(`/plugins/mattermost-readreceipts/api/v1/receipts?channel_id=${encodeURIComponent(channelId)}`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            credentials: 'include'
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const receipts: Receipt[] = await response.json();
+        console.log('📥 [Store] Received receipts:', {
+            channelId,
+            count: receipts.length,
+            receipts
+        });
+
+        // Group receipts by message
+        const messageReceipts = new Map<string, Set<string>>();
+        for (const receipt of receipts) {
+            const users = messageReceipts.get(receipt.message_id) || new Set<string>();
+            users.add(receipt.user_id);
+            messageReceipts.set(receipt.message_id, users);
+        }
+
+        // Update receipt map
+        messageReceipts.forEach((users, messageId) => {
+            receiptMap.set(messageId, users);
+        });
+
+        console.log('💾 [Store] Updated receipt map:', {
+            channelId,
+            messageCount: messageReceipts.size,
+            messages: Array.from(messageReceipts.keys())
+        });
+
+        // Dispatch event to trigger rerenders
+        const event = new CustomEvent(STORE_UPDATE_EVENT, {
+            detail: {
+                type: 'receipts_loaded',
+                channelId,
+                messageCount: messageReceipts.size,
+                receipts: Array.from(messageReceipts.entries()).map(([msgId, users]) => ({
+                    messageId: msgId,
+                    users: Array.from(users)
+                }))
+            }
+        });
+
+        window.dispatchEvent(event);
+        
+        console.log('📢 [Store] Dispatched store update event:', {
+            type: 'receipts_loaded',
+            channelId,
+            messageCount: messageReceipts.size
+        });
+    } catch (error) {
+        console.error('❌ [Store] Failed to load receipts:', {
+            channelId,
+            error
+        });
+        throw error;
+    }
+};
+
+// Export event name for components
+export const RECEIPT_STORE_UPDATE = STORE_UPDATE_EVENT;

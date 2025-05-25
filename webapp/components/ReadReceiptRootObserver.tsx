@@ -2,6 +2,7 @@
 import React, { useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import PostReceipt from './PostReceipt';
+import { Post } from '../types/mattermost-webapp';
 
 const ReadReceiptRootObserver: React.FC = () => {
     useEffect(() => {
@@ -48,10 +49,16 @@ const ReadReceiptRootObserver: React.FC = () => {
                 }
             }
 
-            // Render our receipt component
-            console.log('🎨 [RootObserver] Rendering PostReceipt for:', postId);
+            // Get post user_id from the post node
+            const userId = node.getAttribute('data-user-id') || node.getAttribute('data-post-user-id') || '';
+            console.log('🎨 [RootObserver] Rendering PostReceipt for:', {
+                postId,
+                userId,
+                userIdSource: userId === node.getAttribute('data-user-id') ? 'data-user-id' : 'data-post-user-id'
+            });
+
             ReactDOM.render(
-                <PostReceipt post={{ id: postId }} />,
+                <PostReceipt post={{ id: postId, user_id: userId }} />,
                 receiptContainer
             );
         }

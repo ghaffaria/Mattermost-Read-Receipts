@@ -1,22 +1,26 @@
 // webapp/plugin.tsx
 import React from 'react';
+// @ts-ignore
 import {PluginRegistry} from 'mattermost-webapp/plugins/registry';
 import PostReceipt from './components/PostReceipt';
 import {handleWebSocketEvent, initializeWebSocket} from './websocket';
-import {setMattermostStore} from './store';
+import {setMattermostStore, loadInitialReceipts} from './store';
 import ReadReceiptRootObserver from './components/ReadReceiptRootObserver';
+
+interface WebSocketMessage {
+    event: string;
+    data: {
+        channel_ids?: string[];
+    };
+}
 
 declare global {
     interface Window {
         store: any;
-        registerPlugin?: (id: string, plugin: any) => void;
     }
 }
 
-interface Post {
-    id: string;
-    type: string;
-}
+import { Post } from './types/mattermost-webapp';
 
 interface PostProps {
     post: Post;
@@ -33,6 +37,24 @@ export default class ReadReceiptPlugin {
         console.log('🔌 [ReadReceiptPlugin] Initializing WebSocket...');
         const socket = initializeWebSocket();
         socket.onmessage = handleWebSocketEvent(store.dispatch);
+
+        // Listen for channel view events
+        registry.registerWebSocketEventHandler(
+            'multiple_channels_viewed',
+            async (message: WebSocketMessage) => {
+                const channelIds = message.data?.channel_ids;
+                if (channelIds && Array.isArray(channelIds)) {
+                    console.log('👀 [ReadReceiptPlugin] Channels viewed:', channelIds);
+                    channelIds.forEach(channelId => {
+                        loadInitialReceipts(channelId).catch(error => {
+                            console.error('❌ [ReadReceiptPlugin] Failed to load receipts:', {
+                                channelId,
+                                error
+                            });
+                        });
+                    });
+                }
+            });
 
         // Register root component
         registry.registerRootComponent(ReadReceiptRootObserver);
