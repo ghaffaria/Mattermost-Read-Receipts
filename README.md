@@ -1,8 +1,14 @@
 # Mattermost Read Receipts Plugin
 
 This plugin adds WhatsApp/Telegram-style read receipts functionality to Mattermost, allowing users to see who has read their messages. It includes both server-side and webapp components with real-time visibility tracking.
+**Download Plugin**
+![Download Plugin](dist/mattermost-readreceipts-2025.05.26.1827.tar.gz)
+
+
     ![Read Receipts in the Channel](image/channel.jpg)
+
     ![Read Receipts in Direct Message](image/user1.jpg)
+    
     ![Read Receipts in Direct Message](image/user2.jpg)
 
 ## Features
@@ -20,19 +26,12 @@ This plugin adds WhatsApp/Telegram-style read receipts functionality to Mattermo
 
 This plugin supports the following databases:
 
-- **PostgreSQL**: Tested with version 13. The plugin uses the following fallback DSN when the database connection string is masked or unavailable:
+- **PostgreSQL**: Tested with version 13.
+- **MySQL**: Tested with version 8.0.
 
-  ```plaintext
-  host=db port=5432 dbname=mattermost user=mmuser password=mostest sslmode=disable
-  ```
+### Important Note
 
-- **MySQL**: Tested with version 8.0. The plugin uses the following fallback DSN when the database connection string is masked or unavailable:
-
-  ```plaintext
-  mmuser:mostest@tcp(db:3306)/mattermost?charset=utf8mb4,utf8&writeTimeout=30s
-  ```
-
-Ensure that your database service names in Docker Compose match the `host` values in the fallback DSNs.
+The plugin no longer provides fallback DSNs. You must configure the database connection string in Mattermost System Console → Environment → Database. If the connection string is missing or invalid, the plugin will fail to activate.
 
 ## Installation
 
@@ -84,21 +83,6 @@ Ensure that your database service names in Docker Compose match the `host` value
 
 4. Configure your database:
 
-   - For PostgreSQL, ensure the following environment variables are set in your Docker Compose file:
-
-     ```plaintext
-     POSTGRES_USER=mmuser
-     POSTGRES_PASSWORD=mostest
-     POSTGRES_DB=mattermost
-     ```
-
-   - For MySQL, ensure the following environment variables are set in your Docker Compose file:
-
-     ```plaintext
-     MYSQL_ROOT_PASSWORD=rootpass
-     MYSQL_DATABASE=read_receipts_test
-     ```
-
    - Update the `MM_SQLSETTINGS_DATASOURCE` in your Mattermost app configuration to match your database setup.
 
 5. Install the plugin:
@@ -106,6 +90,10 @@ Ensure that your database service names in Docker Compose match the `host` value
    - Copy the generated `.tar.gz` file from `dist/`
    - Upload it to your Mattermost instance
    - Enable the plugin in System Console
+
+### Note
+
+The plugin does not ship with its own DSN. It re-uses the global Mattermost SQL settings (System Console → Environment → Database). Ensure that these settings are correct before enabling the plugin.
 
 ## Development Workflow
 

@@ -5,7 +5,6 @@ package main
 import (
 	"database/sql"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -70,7 +69,7 @@ func (p *Plugin) OnActivate() error {
 	p.logDebug("[Plugin] Activating read receipts plugin...")
 
 	// Get database driver type from Mattermost config
-	config := p.API.GetConfig()
+	config := p.API.GetUnsanitizedConfig()
 	if config == nil {
 		return fmt.Errorf("failed to get Mattermost config")
 	}
@@ -82,36 +81,13 @@ func (p *Plugin) OnActivate() error {
 	driverName := *config.SqlSettings.DriverName
 	p.logDebug("[Plugin] Using database driver", "driver", driverName)
 
-	// Get DSN with fallbacks
-	var dsn string
-	if config.SqlSettings.DataSource == nil || *config.SqlSettings.DataSource == "" || strings.Contains(*config.SqlSettings.DataSource, "*") {
-		// Try environment variable
-		dsn = os.Getenv("READRECEIPTS_DSN")
-		if dsn != "" {
-			p.logInfo("[Plugin] Using database connection from READRECEIPTS_DSN environment variable")
-		} else {
-			// Fall back to docker-compose defaults (service name is 'db')
-			switch driverName {
-			case model.DatabaseDriverMysql:
-				// MySQL fallback: use service name 'db' for host
-				dsn = "mmuser:mostest@tcp(db:3306)/mattermost?charset=utf8mb4,utf8&writeTimeout=30s"
-				p.logInfo("[Plugin] Using docker-compose MySQL fallback DSN (host=db)")
-			case model.DatabaseDriverPostgres:
-				// Postgres fallback: use service name 'db' for host
-				dsn = "host=db port=5432 dbname=mattermost user=mmuser password=mostest sslmode=disable"
-				p.logInfo("[Plugin] Using docker-compose Postgres fallback DSN (host=db)")
-			default:
-				p.logInfo("[Plugin] Unknown driver, no fallback DSN available")
-			}
-		}
-	} else {
-		dsn = *config.SqlSettings.DataSource
-		p.logInfo("[Plugin] Using database connection from Mattermost configuration")
+	if config.SqlSettings.DataSource == nil || *config.SqlSettings.DataSource == "" {
+		return fmt.Errorf("database connection string not configured; please set System Console → Environment → Database")
 	}
 
-	if dsn == "" {
-		return fmt.Errorf("could not determine database connection string")
-	}
+	// Use the configured DSN directly
+	dsn := *config.SqlSettings.DataSource
+	p.logInfo("[Plugin] Using database connection from Mattermost configuration")
 
 	// Open a new database connection using the determined DSN
 	db, err := sql.Open(driverName, dsn)
