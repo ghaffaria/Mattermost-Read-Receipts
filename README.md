@@ -20,6 +20,8 @@ WhatsApp / Telegram style “Seen by …” indicators for every post in Matterm
 | **Real-time tracking** | Intersection Observer + WebSockets |
 | **Accurate**           | fires only after a message is visible ≥ 2 s |
 | **Persistent**         | receipts stored in the same DB that Mattermost uses |
+| **Resilient**         | handles deleted posts gracefully |
+| **Two-level tracking**| per-post and per-channel read status |
 | **UI**                 | WhatsApp-like inline badges:<br> `Seen by Ali, Sam` |
 | **Admin-friendly**     | SysConsole settings, debug REST endpoints, structured logs |
 | **House-keeping**      | automatic DB clean-up (retention_days) |
@@ -94,11 +96,21 @@ make dev                       # live-reload plugin inside the container
 | **`missing "=" after "********"` on activation** | The DB DSN is still masked. Paste the real DSN and click **Save** in System Console.                                  |
 | Receipts never appear                            | Make sure both users run ≥ Mattermost v6 and have the plugin enabled. Check the browser console for WebSocket events. |
 | Rows accumulate forever                          | Set **Retention (days)** to a non-zero value.                                                                         |
+| Some read receipts not showing                   | If post is deleted, plugin falls back to showing channel-level read status                                            |
 
-Debug endpoints (System Admin only):
+## API Endpoints
 
+### Debug Endpoints (System Admin only)
 * `GET …/plugins/mattermost-readreceipts/api/v1/debug/ping`
 * `GET …/plugins/mattermost-readreceipts/api/v1/debug/db`
+
+### Read Status Endpoints
+* `GET …/plugins/mattermost-readreceipts/api/v1/receipts` - Get per-post read statuses for a channel
+* `GET …/plugins/mattermost-readreceipts/api/v1/channel/{channelID}/readers` - Get channel-level read status
+* `GET …/plugins/mattermost-readreceipts/api/v1/read/channel/{channelID}` - Get readers since a specific time
+* `POST …/plugins/mattermost-readreceipts/api/v1/read` - Mark a post as read
+
+All reader endpoints return a consistent JSON response with a `user_ids` array containing the IDs of users who have read the content.
 
 ---
 
