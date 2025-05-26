@@ -118,6 +118,12 @@ func (p *Plugin) OnActivate() error {
 		return fmt.Errorf("failed to initialize store: %w", err)
 	}
 
+	// Try to initialize channel reads table, but don't fail activation if it errors
+	if err := p.store.InitializeChannelReads(); err != nil {
+		p.logError("[Plugin] WARNING: Failed to initialize channel_reads table - channel-level receipts will be disabled",
+			"error", err.Error())
+	}
+
 	if p.getConfiguration().LogLevel != "error" {
 		p.logInfo("[Plugin] Read receipts plugin activated successfully")
 	}

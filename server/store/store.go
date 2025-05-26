@@ -25,6 +25,11 @@ type ReceiptStore interface {
 
 	// Initialize initializes the store (creates tables, indexes, etc)
 	Initialize() error
+
+	// Channel-level receipts
+	UpsertChannelRead(channelID, userID, lastPostID string, lastSeenMs int64) error
+	GetReadersSince(channelID string, sinceMs int64, excludeUserID string) ([]string, error)
+	InitializeChannelReads() error
 }
 
 // BaseStore provides common functionality for store implementations

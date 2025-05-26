@@ -1,4 +1,3 @@
-
 # Mattermost Read Receipts Plugin
 ## Download
 
@@ -38,6 +37,11 @@ WhatsApp / Telegram style “Seen by …” indicators for every post in Matterm
 > The plugin **re-uses** the connection string configured under  
 > *System Console → Environment → Database*.  
 > If that field is still masked (`***********`) the plugin cannot connect and will refuse to start.
+>
+> 📝 **MySQL Configuration Note:**  
+> If your MySQL DSN includes `?multiStatements=true`, this option is only required 
+> for legacy multi-statement cleanup operations. With the current implementation, 
+> this option can be safely removed from your DSN.
 
 ---
 
@@ -98,6 +102,32 @@ Debug endpoints (System Admin only):
 
 ---
 
+## Database Schema
+
+The plugin automatically creates and maintains the following tables on first run:
+
+### channel_reads
+
+Persists channel-level "Seen by ..." information, mapping users to their last seen message in each channel.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| channel_id | TEXT/VARCHAR | Mattermost channel identifier (part of PK) |
+| user_id | TEXT/VARCHAR | User who has read messages (part of PK) |
+| last_post_id | TEXT/VARCHAR | ID of the last post seen by this user |
+| last_seen_at | BIGINT | Timestamp (milliseconds) when the user last saw this post |
+
+Primary key: (channel_id, user_id)
+
+Indexes:
+
+* idx_channel_reads_channel_id
+* idx_channel_reads_user_id
+
+This table powers the real-time "Seen by ..." indicators in the UI and ensures they persist across server restarts. The plugin automatically creates and populates this table on first activation.
+
+---
+
 ## Contributing
 
 1. Fork, branch from **main**.
@@ -116,8 +146,4 @@ Debug endpoints (System Admin only):
 
 * Mattermost team for the plugin framework
 * All contributors – PRs welcome!
-
-```
-
----
 

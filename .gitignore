@@ -25,3 +25,4 @@ webapp/node_modules
 mattermost/*
 /dist/*
 /server/dist/*
+git-diff-server.txt

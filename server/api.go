@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/arg/mattermost-readreceipts/server/store"
@@ -18,10 +19,12 @@ func (p *Plugin) ServeHTTP(c *plugin.Context, w http.ResponseWriter, r *http.Req
 	router := mux.NewRouter()
 
 	router.Handle("/api/v1/read", p.MattermostAuthorizationRequired(http.HandlerFunc(p.HandleReadReceipt))).Methods("POST")
+	router.Handle("/api/v1/channel/{channelID}/readers", p.MattermostAuthorizationRequired(http.HandlerFunc(p.HandleGetChannelReaders))).Methods("GET")
 	router.Handle("/api/v1/receipts", p.MattermostAuthorizationRequired(http.HandlerFunc(p.HandleGetReceipts))).Methods("GET")
 	router.Handle("/api/v1/config", p.MattermostAuthorizationRequired(http.HandlerFunc(p.HandleGetConfig))).Methods("GET")
 	router.Handle("/api/v1/debug/ping", http.HandlerFunc(p.HandlePing)).Methods("GET")
 	router.Handle("/api/v1/debug/db", p.MattermostAuthorizationRequired(http.HandlerFunc(p.HandleDBCheck))).Methods("GET")
+	router.Handle("/api/v1/read/channel/{channelID}", p.MattermostAuthorizationRequired(http.HandlerFunc(p.HandleGetReadersSince))).Methods("GET")
 
 	p.logDebug("[API] Received request",
 		"path", r.URL.Path,
@@ -118,6 +121,17 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 			"message_id", req.MessageID,
 			"user_id", userID,
 			"channel_id", channelId)
+
+		// Update channel-level read receipt
+		if err := p.store.UpsertChannelRead(channelId, userID, post.Id, post.CreateAt); err != nil {
+			p.logError("[API] Failed to upsert channel read",
+				"channel_id", channelId,
+				"user_id", userID,
+				"post_id", post.Id,
+				"error", err.Error())
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 	} else {
 		p.logInfo("[API] GetPost failed, will broadcast globally",
 			"message_id", req.MessageID,
@@ -193,21 +207,35 @@ func (p *Plugin) HandleGetReceipts(w http.ResponseWriter, r *http.Request) {
 		"channel_id", channelID,
 		"user_id", userID)
 
-	receipts, err := p.store.GetByChannel(channelID, userID)
+	sinceMs, err := p.getSinceMillis(r)
 	if err != nil {
-		p.logError("[API] Failed to fetch receipts",
-			"channel_id", channelID,
-			"error", err.Error())
-		http.Error(w, "Failed to fetch receipts", http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	p.logDebug("[API] Returning receipts",
+	// Get list of users who have read messages in this channel since the given time
+	readers, err := p.store.GetReadersSince(channelID, sinceMs, userID)
+	if err != nil {
+		p.logError("[API] Failed to fetch channel readers",
+			"channel_id", channelID,
+			"since", sinceMs,
+			"error", err.Error())
+		http.Error(w, "Failed to fetch channel readers", http.StatusInternalServerError)
+		return
+	}
+
+	p.logDebug("[API] Returning channel readers",
 		"channel_id", channelID,
-		"count", len(receipts))
+		"reader_count", len(readers))
+
+	response := struct {
+		UserIDs []string `json:"user_ids"`
+	}{
+		UserIDs: readers,
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(receipts); err != nil {
+	if err := json.NewEncoder(w).Encode(response); err != nil {
 		p.logError("[API] Error encoding response",
 			"channel_id", channelID,
 			"error", err.Error())
@@ -230,6 +258,111 @@ func (p *Plugin) HandleGetConfig(w http.ResponseWriter, r *http.Request) {
 		p.logError("[API] Error encoding config response", "error", err.Error())
 		http.Error(w, "Error encoding response", http.StatusInternalServerError)
 	}
+}
+
+func (p *Plugin) HandleGetReadersSince(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	channelID := vars["channelID"]
+	if channelID == "" {
+		http.Error(w, "Missing channel ID", http.StatusBadRequest)
+		return
+	}
+
+	userID := r.Header.Get("Mattermost-User-Id")
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	sinceMs, err := p.getSinceMillis(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	readers, err := p.store.GetReadersSince(channelID, sinceMs, userID)
+	if err != nil {
+		p.logError("[API] Failed to get readers since",
+			"channel_id", channelID,
+			"since", sinceMs,
+			"error", err.Error())
+		http.Error(w, "Failed to get readers", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(readers); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
+}
+
+// HandleGetChannelReaders handles GET /api/v1/channel/{channelID}/readers
+func (p *Plugin) HandleGetChannelReaders(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	channelID := vars["channelID"]
+	if channelID == "" {
+		http.Error(w, "Missing channel ID", http.StatusBadRequest)
+		return
+	}
+
+	userID := r.Header.Get("Mattermost-User-Id")
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	sinceMs, err := p.getSinceMillis(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	readers, err := p.store.GetReadersSince(channelID, sinceMs, userID)
+	if err != nil {
+		p.logError("[API] Failed to get channel readers",
+			"channel_id", channelID,
+			"since", sinceMs,
+			"error", err.Error())
+		http.Error(w, "Failed to get readers", http.StatusInternalServerError)
+		return
+	}
+
+	response := struct {
+		UserIDs []string `json:"user_ids"`
+	}{
+		UserIDs: readers,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		return
+	}
+}
+
+// Helper function to resolve timestamp in milliseconds since epoch
+func (p *Plugin) getSinceMillis(r *http.Request) (int64, error) {
+	query := r.URL.Query()
+	sinceStr := query.Get("since")
+	if sinceStr != "" {
+		sinceMs, err := strconv.ParseInt(sinceStr, 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid since parameter")
+		}
+		return sinceMs, nil
+	}
+
+	postID := query.Get("postID")
+	if postID != "" {
+		post, err := p.API.GetPost(postID)
+		if err != nil {
+			return 0, fmt.Errorf("invalid post ID: %w", err)
+		}
+		// Post.CreateAt is already in milliseconds since epoch
+		return post.CreateAt, nil
+	}
+
+	return 0, fmt.Errorf("missing since or postID")
 }
 
 func (p *Plugin) storeReadEvent(event ReadEvent) error {
