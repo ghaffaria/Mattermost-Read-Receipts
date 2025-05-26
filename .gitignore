@@ -20,11 +20,7 @@
 
 webapp/node_modules
 
-dist/
 *.zip
 
 mattermost/*
 
-*.gz
-/dist/
-/dist/mattermost-readreceipts-0.1.0.tar.gz

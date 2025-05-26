@@ -16,6 +16,24 @@ This plugin adds WhatsApp/Telegram-style read receipts functionality to Mattermo
 - Configurable settings in System Console
 - Comprehensive logging and error handling
 
+## Supported Databases
+
+This plugin supports the following databases:
+
+- **PostgreSQL**: Tested with version 13. The plugin uses the following fallback DSN when the database connection string is masked or unavailable:
+
+  ```plaintext
+  host=db port=5432 dbname=mattermost user=mmuser password=mostest sslmode=disable
+  ```
+
+- **MySQL**: Tested with version 8.0. The plugin uses the following fallback DSN when the database connection string is masked or unavailable:
+
+  ```plaintext
+  mmuser:mostest@tcp(db:3306)/mattermost?charset=utf8mb4,utf8&writeTimeout=30s
+  ```
+
+Ensure that your database service names in Docker Compose match the `host` values in the fallback DSNs.
+
 ## Installation
 
 ### Using Pre-built Release
@@ -64,7 +82,27 @@ This plugin adds WhatsApp/Telegram-style read receipts functionality to Mattermo
    - Build server binaries for multiple architectures
    - Create the plugin bundle in `dist/`
 
-4. Install the plugin:
+4. Configure your database:
+
+   - For PostgreSQL, ensure the following environment variables are set in your Docker Compose file:
+
+     ```plaintext
+     POSTGRES_USER=mmuser
+     POSTGRES_PASSWORD=mostest
+     POSTGRES_DB=mattermost
+     ```
+
+   - For MySQL, ensure the following environment variables are set in your Docker Compose file:
+
+     ```plaintext
+     MYSQL_ROOT_PASSWORD=rootpass
+     MYSQL_DATABASE=read_receipts_test
+     ```
+
+   - Update the `MM_SQLSETTINGS_DATASOURCE` in your Mattermost app configuration to match your database setup.
+
+5. Install the plugin:
+
    - Copy the generated `.tar.gz` file from `dist/`
    - Upload it to your Mattermost instance
    - Enable the plugin in System Console
