@@ -1,3 +1,4 @@
+// File: server/config.go
 package store
 
 import (
