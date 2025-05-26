@@ -69,31 +69,31 @@ func (p *Plugin) OnActivate() error {
 	p.logDebug("[Plugin] Activating read receipts plugin...")
 
 	// Get database driver type from Mattermost config
-	driverName := *p.API.GetConfig().SqlSettings.DriverName
-
-	// Get database connection from Mattermost config
 	config := p.API.GetConfig()
 	if config == nil {
 		return fmt.Errorf("failed to get Mattermost config")
 	}
 
-	var dsn string
-	if config.SqlSettings.DataSource != nil {
-		dsn = *config.SqlSettings.DataSource
-	} else {
-		// Fallback to a default connection string if not configured
-		dsn = fmt.Sprintf("host=%s port=%d dbname=%s user=%s password=%s sslmode=disable",
-			"localhost", 5432, "mattermost", "mmuser", "mostest")
-		p.logDebug("[Plugin] Using default database connection string")
+	if config.SqlSettings.DriverName == nil {
+		return fmt.Errorf("database driver name not configured")
 	}
 
-	p.logDebug("[Plugin] Database driver", "driver", driverName)
+	driverName := *config.SqlSettings.DriverName
+	p.logDebug("[Plugin] Using database driver", "driver", driverName)
 
-	// Open database connection
-	db, err := sql.Open(driverName, dsn)
+	if config.SqlSettings.DataSource == nil || *config.SqlSettings.DataSource == "" {
+		return fmt.Errorf("database connection string not configured")
+	}
+
+	// Open a new database connection using the Mattermost configuration
+	db, err := sql.Open(driverName, *config.SqlSettings.DataSource)
 	if err != nil {
-		p.logError("[Plugin] Failed to connect to database", "error", err.Error())
 		return fmt.Errorf("failed to connect to database: %w", err)
+	}
+
+	// Test the connection
+	if err := db.Ping(); err != nil {
+		return fmt.Errorf("failed to ping database: %w", err)
 	}
 
 	// Initialize the appropriate store based on the driver
