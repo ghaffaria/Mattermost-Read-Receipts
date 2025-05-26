@@ -23,11 +23,13 @@ module.exports = {
     ],
   },
   externals: {
-  react: 'React',
-  'react-dom': 'ReactDOM',
-  redux: 'Redux',
-  'react-redux': 'ReactRedux'
-},
+    react: 'React',
+    'react-dom': 'ReactDOM',
+    redux: 'Redux',
+    'react-redux': 'ReactRedux',
+    'mattermost-redux': 'window.reduxStore',
+    '@mattermost/client': 'window.reduxStore'
+  },
 
   devtool: 'source-map',
 };

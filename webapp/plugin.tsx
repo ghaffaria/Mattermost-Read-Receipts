@@ -27,7 +27,7 @@ interface PostProps {
 }
 
 export default class ReadReceiptPlugin {
-    initialize(registry: PluginRegistry, store: any) {
+    async initialize(registry: PluginRegistry, store: any) {
         console.log('🔌 [ReadReceiptPlugin] Initializing...');
         
         // Set the Mattermost store reference for our plugin
@@ -56,7 +56,25 @@ export default class ReadReceiptPlugin {
                 }
             });
 
-        // Register root component
+        // Pre-load receipts for current channel before mounting
+        try {
+            const state = store.getState();
+            const currentChannelId = state?.entities?.channels?.currentChannelId;
+            
+            if (currentChannelId) {
+                console.log('📥 [ReadReceiptPlugin] Pre-loading receipts for channel:', currentChannelId);
+                await loadInitialReceipts(currentChannelId).catch(error => {
+                    console.error('❌ [ReadReceiptPlugin] Failed to pre-load receipts:', error);
+                });
+                console.log('✅ [ReadReceiptPlugin] Pre-loaded receipts successfully');
+            } else {
+                console.log('ℹ️ [ReadReceiptPlugin] No active channel, skipping pre-load');
+            }
+        } catch (error) {
+            console.error('❌ [ReadReceiptPlugin] Failed to pre-load receipts:', error);
+        }
+
+        // Register root component after pre-loading (or if pre-load fails)
         registry.registerRootComponent(ReadReceiptRootObserver);
 
         // Register post component
