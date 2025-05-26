@@ -5,6 +5,7 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -32,20 +33,24 @@ func (p *Plugin) getConfiguration() *Configuration {
 }
 
 func (p *Plugin) OnConfigurationChange() error {
-	configuration := new(Configuration)
-
-	// Load the public configuration fields from the Mattermost server configuration.
-	if err := p.API.LoadPluginConfiguration(configuration); err != nil {
-		return fmt.Errorf("failed to load plugin configuration: %w", err)
+	var cfg Configuration
+	if err := p.API.LoadPluginConfiguration(&cfg); err != nil {
+		return fmt.Errorf("unable to load plugin config: %w", err)
 	}
 
-	if err := configuration.IsValid(); err != nil {
+	if cfg.LogLevel == "" {
+		cfg.LogLevel = "info"
+	} else {
+		cfg.LogLevel = strings.ToLower(cfg.LogLevel)
+	}
+
+	if err := cfg.IsValid(); err != nil {
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
 
 	configLock.Lock()
 	defer configLock.Unlock()
-	p.conf = configuration
+	p.conf = &cfg
 
 	return nil
 }
@@ -66,15 +71,26 @@ func (p *Plugin) OnActivate() error {
 	// Get database driver type from Mattermost config
 	driverName := *p.API.GetConfig().SqlSettings.DriverName
 
-	// Get database connection string from environment or use default
-	dsn := p.API.GetConfig().SqlSettings.DataSource
-	if dsn == nil || *dsn == "" {
-		dsn = model.NewString("postgres://mmuser:mostest@db:5432/mattermost?sslmode=disable")
+	// Get database connection from Mattermost config
+	config := p.API.GetConfig()
+	if config == nil {
+		return fmt.Errorf("failed to get Mattermost config")
+	}
+
+	var dsn string
+	if config.SqlSettings.DataSource != nil {
+		dsn = *config.SqlSettings.DataSource
+	} else {
+		// Fallback to a default connection string if not configured
+		dsn = fmt.Sprintf("host=%s port=%d dbname=%s user=%s password=%s sslmode=disable",
+			"localhost", 5432, "mattermost", "mmuser", "mostest")
 		p.logDebug("[Plugin] Using default database connection string")
 	}
 
+	p.logDebug("[Plugin] Database driver", "driver", driverName)
+
 	// Open database connection
-	db, err := sql.Open(driverName, *dsn)
+	db, err := sql.Open(driverName, dsn)
 	if err != nil {
 		p.logError("[Plugin] Failed to connect to database", "error", err.Error())
 		return fmt.Errorf("failed to connect to database: %w", err)

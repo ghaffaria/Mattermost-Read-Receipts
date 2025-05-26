@@ -585,7 +585,7 @@
                 "enable": true,
                 "enablelogging": true,
                 "enablereadreceipts": true,
-                "loglevel": "debug",
+                "loglevel": "info",
                 "retentiondays": 30,
                 "visibilitythresholdms": 2000
             },

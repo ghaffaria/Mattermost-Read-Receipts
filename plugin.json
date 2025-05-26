@@ -20,9 +20,9 @@
     "settings": [
       {
         "key": "Enable",
-        "display_name": "Enable Plugin",
+        "display_name": "Enable Read Receipts",
         "type": "bool",
-        "help_text": "When true, read receipts will be enabled",
+        "help_text": "When true, per-message read receipts are active",
         "default": true
       },
       {
@@ -47,15 +47,15 @@
         "default": "info",
         "options": [
           {
-            "display_name": "Debug",
+            "display_name": "debug",
             "value": "debug"
           },
           {
-            "display_name": "Info",
+            "display_name": "info",
             "value": "info"
           },
           {
-            "display_name": "Error",
+            "display_name": "error",
             "value": "error"
           }
         ]
