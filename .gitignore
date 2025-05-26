@@ -23,4 +23,5 @@ webapp/node_modules
 *.zip
 
 mattermost/*
-
+/dist/*
+/server/dist/*
