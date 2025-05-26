@@ -202,3 +202,26 @@ export const loadInitialReceipts = async (channelId: string): Promise<void> => {
 
 // Export event name for components
 export const RECEIPT_STORE_UPDATE = STORE_UPDATE_EVENT;
+
+export let visibilityThresholdMs = 2000;
+
+export async function fetchPluginConfig(): Promise<void> {
+    try {
+        const response = await fetch('/plugins/mattermost-readreceipts/api/v1/config');
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const config = await response.json();
+        if (typeof config.visibility_threshold_ms === 'number') {
+            visibilityThresholdMs = config.visibility_threshold_ms;
+            if (!visibilityThresholdMs) {
+                visibilityThresholdMs = 2000; // Reset to default if received 0
+                console.log('⚙️ [Store] Invalid threshold received, using default:', visibilityThresholdMs);
+            }
+            console.log('⚙️ [Store] Updated visibility threshold:', visibilityThresholdMs);
+        }
+    } catch (error) {
+        console.error('❌ [Store] Failed to fetch plugin config:', error);
+        // Keep default value on error
+    }
+}

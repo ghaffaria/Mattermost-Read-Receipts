@@ -1,6 +1,9 @@
 # Mattermost Read Receipts Plugin
 
 This plugin adds WhatsApp/Telegram-style read receipts functionality to Mattermost, allowing users to see who has read their messages. It includes both server-side and webapp components with real-time visibility tracking.
+    ![Read Receipts in the Channel](image/channel.jpg)
+    ![Read Receipts in Direct Message](image/user1.jpg)
+    ![Read Receipts in Direct Message](image/user2.jpg)
 
 ## Features
 

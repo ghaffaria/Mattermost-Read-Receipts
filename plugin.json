@@ -19,16 +19,46 @@
   "settings_schema": {
     "settings": [
       {
-        "key": "EnableReadReceipts",
-        "display_name": "Enable Read Receipts",
+        "key": "Enable",
+        "display_name": "Enable Plugin",
         "type": "bool",
+        "help_text": "When true, read receipts will be enabled",
         "default": true
       },
       {
-        "key": "EnableLogging",
-        "display_name": "Enable Logging",
-        "type": "bool",
-        "default": false
+        "key": "VisibilityThresholdMs",
+        "display_name": "Visibility Threshold (ms)",
+        "type": "number",
+        "help_text": "Time in milliseconds a message must be visible before marking as read",
+        "default": 2000
+      },
+      {
+        "key": "RetentionDays",
+        "display_name": "Receipt Retention (days)",
+        "type": "number",
+        "help_text": "Number of days to retain read receipts in the database",
+        "default": 30
+      },
+      {
+        "key": "LogLevel",
+        "display_name": "Log Level",
+        "type": "dropdown",
+        "help_text": "Set the logging level for the plugin",
+        "default": "info",
+        "options": [
+          {
+            "display_name": "Debug",
+            "value": "debug"
+          },
+          {
+            "display_name": "Info",
+            "value": "info"
+          },
+          {
+            "display_name": "Error",
+            "value": "error"
+          }
+        ]
       }
     ]
   }

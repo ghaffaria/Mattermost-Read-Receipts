@@ -9,6 +9,15 @@ services:
     volumes:
       - db-volume:/var/lib/postgresql/data
 
+  mysql-test:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: read_receipts_test
+    ports:
+      - "3307:3306"
+
   app:
     image: mattermost/mattermost-team-edition:release-9.5
     platform: linux/amd64 

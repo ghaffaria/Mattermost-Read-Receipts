@@ -582,8 +582,12 @@
         "ClientDirectory": "./client/plugins",
         "Plugins": {
             "mattermost-readreceipts": {
+                "enable": true,
                 "enablelogging": true,
-                "enablereadreceipts": true
+                "enablereadreceipts": true,
+                "loglevel": "debug",
+                "retentiondays": 30,
+                "visibilitythresholdms": 2000
             },
             "playbooks": {
                 "BotUserID": "akb6tzsezbr5xyg3bapjon5fhw"

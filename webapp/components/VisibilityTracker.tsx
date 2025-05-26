@@ -2,6 +2,7 @@
 
 import React, { FC, ReactElement, useEffect, useRef, useState } from 'react';
 import debounce from 'lodash.debounce';
+import { visibilityThresholdMs } from '../store';
 
 interface VisibilityTrackerProps {
     messageId: string;
@@ -162,10 +163,10 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId, postAuthorId
 
         if (visibilityStartTime.current && !hasSent) {
             const visibilityDuration = Date.now() - visibilityStartTime.current;
-            if (visibilityDuration >= 2000) {
+            if (visibilityDuration >= visibilityThresholdMs) {
                 console.log(`⌛ [VisibilityTracker] Visibility threshold reached for ${messageId}:`, {
                     duration: visibilityDuration,
-                    threshold: 2000
+                    threshold: visibilityThresholdMs
                 });
                 sendReadReceipt();
                 resetVisibilityTimer();

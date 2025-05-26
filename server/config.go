@@ -1,35 +1,40 @@
 package main
 
 import (
+	"fmt"
 	"sync"
 )
 
-// Config holds the plugin configuration loaded from the System Console.
-type Config struct {
-	EnableReadReceipts bool
-	EnableLogging      bool
+// Configuration represents the plugin's configuration
+type Configuration struct {
+	Enable                bool   `json:"enable" mapstructure:"Enable"`
+	VisibilityThresholdMs int    `json:"visibility_threshold_ms" mapstructure:"VisibilityThresholdMs"`
+	RetentionDays         int    `json:"retention_days" mapstructure:"RetentionDays"`
+	LogLevel              string `json:"log_level" mapstructure:"LogLevel"`
 }
 
-// ReadReceiptPluginConfig is the global configuration instance.
-var ReadReceiptPluginConfig = &Config{}
-var configLock = &sync.RWMutex{}
-
-// OnConfigurationChange is called when the plugin configuration changes.
-func (p *Plugin) OnConfigurationChange() error {
-	config := &Config{}
-
-	// Load the configuration from the System Console.
-	if err := p.API.LoadPluginConfiguration(config); err != nil {
-		return err
+// getDefaultConfiguration returns the default configuration
+func getDefaultConfiguration() *Configuration {
+	return &Configuration{
+		Enable:                true,
+		VisibilityThresholdMs: 2000,
+		RetentionDays:         30,
+		LogLevel:              "info",
 	}
+}
 
-	// Update the global configuration instance.
-	configLock.Lock()
-	defer configLock.Unlock()
-	*ReadReceiptPluginConfig = *config
-
-	// Update the enableLogging variable based on the configuration.
-	enableLogging = config.EnableLogging
-
+// IsValid checks if the configuration is valid
+func (c *Configuration) IsValid() error {
+	if c.VisibilityThresholdMs < 0 {
+		return fmt.Errorf("visibility threshold must be non-negative")
+	}
+	if c.RetentionDays < 0 {
+		return fmt.Errorf("retention days must be non-negative")
+	}
+	if c.LogLevel != "debug" && c.LogLevel != "info" && c.LogLevel != "error" {
+		return fmt.Errorf("log level must be one of: debug, info, error")
+	}
 	return nil
 }
+
+var configLock = &sync.RWMutex{}

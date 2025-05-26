@@ -1,0 +1,990 @@
+diff --git a/README.md b/README.md
+index 09ef914..cde5aa1 100644
+--- a/README.md
++++ b/README.md
+@@ -1,6 +1,9 @@
+ # Mattermost Read Receipts Plugin
+ 
+ This plugin adds WhatsApp/Telegram-style read receipts functionality to Mattermost, allowing users to see who has read their messages. It includes both server-side and webapp components with real-time visibility tracking.
++    ![Read Receipts in the Channel](image/channel.jpg)
++    ![Read Receipts in Direct Message](image/user1.jpg)
++    ![Read Receipts in Direct Message](image/user2.jpg)
+ 
+ ## Features
+ 
+diff --git a/docker-compose.yml b/docker-compose.yml
+index 05ef914..5ac0e47 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -9,6 +9,15 @@ services:
+     volumes:
+       - db-volume:/var/lib/postgresql/data
+ 
++  mysql-test:
++    image: mysql:8.0
++    restart: always
++    environment:
++      MYSQL_ROOT_PASSWORD: rootpass
++      MYSQL_DATABASE: read_receipts_test
++    ports:
++      - "3307:3306"
++
+   app:
+     image: mattermost/mattermost-team-edition:release-9.5
+     platform: linux/amd64 
+diff --git a/go.mod b/go.mod
+index 007ea9c..c692fe0 100644
+--- a/go.mod
++++ b/go.mod
+@@ -7,6 +7,7 @@ go 1.20
+ require github.com/mattermost/mattermost-server/v6 v6.7.2 // latest stable 6.x
+ 
+ require (
++	github.com/go-sql-driver/mysql v1.6.0
+ 	github.com/gorilla/mux v1.8.1
+ 	github.com/lib/pq v1.10.4
+ 	github.com/stretchr/testify v1.7.1
+@@ -20,7 +21,6 @@ require (
+ 	github.com/fatih/color v1.13.0 // indirect
+ 	github.com/francoispqt/gojay v1.2.13 // indirect
+ 	github.com/go-asn1-ber/asn1-ber v1.5.3 // indirect
+-	github.com/go-sql-driver/mysql v1.6.0 // indirect
+ 	github.com/golang/protobuf v1.5.2 // indirect
+ 	github.com/google/uuid v1.3.0 // indirect
+ 	github.com/gorilla/websocket v1.5.0 // indirect
+diff --git a/plugin.json b/plugin.json
+index 52c16e2..010b32e 100644
+--- a/plugin.json
++++ b/plugin.json
+@@ -19,16 +19,46 @@
+   "settings_schema": {
+     "settings": [
+       {
+-        "key": "EnableReadReceipts",
+-        "display_name": "Enable Read Receipts",
++        "key": "Enable",
++        "display_name": "Enable Plugin",
+         "type": "bool",
++        "help_text": "When true, read receipts will be enabled",
+         "default": true
+       },
+       {
+-        "key": "EnableLogging",
+-        "display_name": "Enable Logging",
+-        "type": "bool",
+-        "default": false
++        "key": "VisibilityThresholdMs",
++        "display_name": "Visibility Threshold (ms)",
++        "type": "number",
++        "help_text": "Time in milliseconds a message must be visible before marking as read",
++        "default": 2000
++      },
++      {
++        "key": "RetentionDays",
++        "display_name": "Receipt Retention (days)",
++        "type": "number",
++        "help_text": "Number of days to retain read receipts in the database",
++        "default": 30
++      },
++      {
++        "key": "LogLevel",
++        "display_name": "Log Level",
++        "type": "dropdown",
++        "help_text": "Set the logging level for the plugin",
++        "default": "info",
++        "options": [
++          {
++            "display_name": "Debug",
++            "value": "debug"
++          },
++          {
++            "display_name": "Info",
++            "value": "info"
++          },
++          {
++            "display_name": "Error",
++            "value": "error"
++          }
++        ]
+       }
+     ]
+   }
+diff --git a/server/api.go b/server/api.go
+index b67a339..da68a61 100644
+--- a/server/api.go
++++ b/server/api.go
+@@ -1,32 +1,29 @@
+-// server/api.go
+-
+ package main
+ 
+ import (
+-	"database/sql"
+ 	"encoding/json"
+ 	"fmt"
+ 	"net/http"
+ 	"time"
+ 
++	"github.com/arg/mattermost-readreceipts/server/store"
+ 	"github.com/gorilla/mux"
+ 	"github.com/mattermost/mattermost-server/v6/model"
+ 	"github.com/mattermost/mattermost-server/v6/plugin"
+ )
+ 
++// Using model.ReadRequest and model.ReadEvent defined in model.go
++
+ func (p *Plugin) ServeHTTP(c *plugin.Context, w http.ResponseWriter, r *http.Request) {
+ 	router := mux.NewRouter()
+ 
+-	// Existing routes
+ 	router.Handle("/api/v1/read", p.MattermostAuthorizationRequired(http.HandlerFunc(p.HandleReadReceipt))).Methods("POST")
+ 	router.Handle("/api/v1/receipts", p.MattermostAuthorizationRequired(http.HandlerFunc(p.HandleGetReceipts))).Methods("GET")
+-
+-	// Debug routes
++	router.Handle("/api/v1/config", http.HandlerFunc(p.HandleGetConfig)).Methods("GET")
+ 	router.Handle("/api/v1/debug/ping", http.HandlerFunc(p.HandlePing)).Methods("GET")
+ 	router.Handle("/api/v1/debug/db", p.MattermostAuthorizationRequired(http.HandlerFunc(p.HandleDBCheck))).Methods("GET")
+ 
+-	// Log all incoming requests
+-	p.API.LogDebug("[API] Received request",
++	p.logDebug("[API] Received request",
+ 		"path", r.URL.Path,
+ 		"method", r.Method,
+ 		"user_agent", r.UserAgent(),
+@@ -45,12 +42,11 @@ func (p *Plugin) MattermostAuthorizationRequired(next http.Handler) http.Handler
+ 			userID = r.Header.Get("Mattermost-User-ID")
+ 		}
+ 		if userID == "" {
+-			p.API.LogError("[API] Unauthorized request", "path", r.URL.Path, "method", r.Method)
++			p.logError("[API] Unauthorized request", "path", r.URL.Path, "method", r.Method)
+ 			http.Error(w, "Not authorized", http.StatusUnauthorized)
+ 			return
+ 		}
+ 
+-		// Add the user ID to the request context
+ 		r = r.WithContext(r.Context())
+ 		next.ServeHTTP(w, r)
+ 	})
+@@ -65,27 +61,23 @@ func (p *Plugin) HandlePing(w http.ResponseWriter, r *http.Request) {
+ }
+ 
+ func (p *Plugin) HandleDBCheck(w http.ResponseWriter, r *http.Request) {
+-	// Test database connection
+-	if err := p.DB.Ping(); err != nil {
+-		p.API.LogError("[DB] Database ping failed", "error", err.Error())
+-		http.Error(w, "Database connection error", http.StatusInternalServerError)
++	if p.store == nil {
++		p.logError("[DB] Store not initialized")
++		http.Error(w, "Database not initialized", http.StatusInternalServerError)
+ 		return
+ 	}
+ 
+-	// Test schema exists
+-	var count int
+-	err := p.DB.QueryRow("SELECT COUNT(*) FROM read_events").Scan(&count)
++	_, err := p.store.GetByChannel("test", "test")
+ 	if err != nil {
+-		p.API.LogError("[DB] Schema check failed", "error", err.Error())
+-		http.Error(w, "Database schema error", http.StatusInternalServerError)
++		p.logError("[DB] Database check failed", "error", err.Error())
++		http.Error(w, "Database error", http.StatusInternalServerError)
+ 		return
+ 	}
+ 
+ 	w.Header().Set("Content-Type", "application/json")
+ 	json.NewEncoder(w).Encode(map[string]interface{}{
+-		"status":           "ok",
+-		"read_events_rows": count,
+-		"time":             time.Now().String(),
++		"status": "ok",
++		"time":   time.Now().String(),
+ 	})
+ }
+ 
+@@ -95,8 +87,7 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
+ 		userID = r.Header.Get("Mattermost-User-ID")
+ 	}
+ 
+-	// Enhanced request logging
+-	p.API.LogDebug("[API] Processing read receipt request",
++	p.logDebug("[API] Processing read receipt request",
+ 		"user_id", userID,
+ 		"content_type", r.Header.Get("Content-Type"),
+ 		"content_length", r.ContentLength,
+@@ -105,7 +96,7 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
+ 
+ 	var req ReadRequest
+ 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+-		p.API.LogError("[API] Failed to decode request body",
++		p.logError("[API] Failed to decode request body",
+ 			"error", err.Error(),
+ 			"content_type", r.Header.Get("Content-Type"),
+ 		)
+@@ -114,22 +105,21 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
+ 	}
+ 
+ 	if req.MessageID == "" {
+-		p.API.LogError("[API] Missing message_id in request")
++		p.logError("[API] Missing message_id in request")
+ 		http.Error(w, "Missing message_id", http.StatusBadRequest)
+ 		return
+ 	}
+ 
+-	// Try to get the channel ID for targeted broadcast
+ 	var channelId string
+ 	post, err := p.API.GetPost(req.MessageID)
+ 	if err == nil {
+ 		channelId = post.ChannelId
+-		p.API.LogInfo("[API] Processing read receipt",
++		p.logInfo("[API] Processing read receipt",
+ 			"message_id", req.MessageID,
+ 			"user_id", userID,
+ 			"channel_id", channelId)
+ 	} else {
+-		p.API.LogWarn("[API] GetPost failed, will broadcast globally",
++		p.logInfo("[API] GetPost failed, will broadcast globally",
+ 			"message_id", req.MessageID,
+ 			"error", err.Error())
+ 	}
+@@ -141,16 +131,14 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
+ 	}
+ 
+ 	if err := p.storeReadEvent(readEvent); err != nil {
+-		p.API.LogError("[API] Failed to store read event",
++		p.logError("[API] Failed to store read event",
+ 			"message_id", readEvent.MessageID,
+ 			"user_id", readEvent.UserID,
+ 			"error", err.Error())
+-		// Return 204 instead of 500 to prevent client retries
+ 		w.WriteHeader(http.StatusNoContent)
+ 		return
+ 	}
+ 
+-	// Only log channel_id if we successfully got it
+ 	logFields := []interface{}{
+ 		"message_id", readEvent.MessageID,
+ 		"user_id", readEvent.UserID,
+@@ -158,9 +146,8 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
+ 	if channelId != "" {
+ 		logFields = append(logFields, "channel_id", channelId)
+ 	}
+-	p.API.LogInfo("[API] Read receipt stored successfully", logFields...)
++	p.logInfo("[API] Read receipt stored successfully", logFields...)
+ 
+-	// Broadcast WebSocket event, targeted to channel if possible
+ 	broadcast := &model.WebsocketBroadcast{}
+ 	if channelId != "" {
+ 		broadcast.ChannelId = channelId
+@@ -180,7 +167,7 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
+ 	if channelId != "" {
+ 		broadcastType = "channel"
+ 	}
+-	p.API.LogDebug("[API] Read receipt broadcast",
++	p.logDebug("[API] Read receipt broadcast",
+ 		"message_id", readEvent.MessageID,
+ 		"user_id", readEvent.UserID,
+ 		"channel_id", channelId,
+@@ -189,97 +176,39 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
+ 	w.WriteHeader(http.StatusNoContent)
+ }
+ 
+-// HandleGetReceipts handles requests to get read receipts for messages in a channel
+ func (p *Plugin) HandleGetReceipts(w http.ResponseWriter, r *http.Request) {
+-	// Get current user ID
+ 	userID := r.Header.Get("Mattermost-User-Id")
+ 	if userID == "" {
+ 		userID = r.Header.Get("Mattermost-User-ID")
+ 	}
+ 
+-	// Get channel ID from query params
+ 	channelID := r.URL.Query().Get("channel_id")
+ 	if channelID == "" {
+-		p.API.LogError("[API] Missing channel_id parameter")
++		p.logError("[API] Missing channel_id parameter")
+ 		http.Error(w, "Missing channel_id parameter", http.StatusBadRequest)
+ 		return
+ 	}
+ 
+-	p.API.LogDebug("[API] Fetching channel receipts",
++	p.logDebug("[API] Fetching channel receipts",
+ 		"channel_id", channelID,
+ 		"user_id", userID)
+ 
+-	// Get all messages in the channel
+-	postList, err := p.API.GetPostsForChannel(channelID, 0, 100)
++	receipts, err := p.store.GetByChannel(channelID, userID)
+ 	if err != nil {
+-		p.API.LogError("[API] Failed to fetch channel posts",
++		p.logError("[API] Failed to fetch receipts",
+ 			"channel_id", channelID,
+ 			"error", err.Error())
+-		http.Error(w, "Failed to fetch channel posts", http.StatusInternalServerError)
+-		return
+-	}
+-
+-	// Get message IDs
+-	messageIDs := make([]string, 0, len(postList.Posts))
+-	for _, post := range postList.Posts {
+-		messageIDs = append(messageIDs, post.Id)
+-	}
+-
+-	// Build query with message IDs
+-	query := `
+-		SELECT message_id, user_id, timestamp 
+-		FROM read_events 
+-		WHERE message_id = ANY($1)
+-		AND user_id != $2
+-		ORDER BY timestamp DESC
+-	`
+-
+-	// Execute query
+-	rows, dbErr := p.DB.Query(query, messageIDs, userID)
+-	if dbErr != nil {
+-		p.API.LogError("[API] Database query failed",
+-			"channel_id", channelID,
+-			"error", dbErr.Error())
+-		http.Error(w, "Database error", http.StatusInternalServerError)
+-		return
+-	}
+-	defer rows.Close()
+-
+-	// Collect results
+-	type Receipt struct {
+-		MessageID string `json:"message_id"`
+-		UserID    string `json:"user_id"`
+-		Timestamp int64  `json:"timestamp"`
+-	}
+-	receipts := []Receipt{}
+-
+-	for rows.Next() {
+-		var receipt Receipt
+-		if scanErr := rows.Scan(&receipt.MessageID, &receipt.UserID, &receipt.Timestamp); scanErr != nil {
+-			p.API.LogError("[API] Error scanning row",
+-				"channel_id", channelID,
+-				"error", scanErr.Error())
+-			continue
+-		}
+-		receipts = append(receipts, receipt)
+-	}
+-
+-	if rowErr := rows.Err(); rowErr != nil {
+-		p.API.LogError("[API] Error iterating rows",
+-			"channel_id", channelID,
+-			"error", rowErr.Error())
+-		http.Error(w, "Database error", http.StatusInternalServerError)
++		http.Error(w, "Failed to fetch receipts", http.StatusInternalServerError)
+ 		return
+ 	}
+ 
+-	p.API.LogDebug("[API] Returning receipts",
++	p.logDebug("[API] Returning receipts",
+ 		"channel_id", channelID,
+ 		"count", len(receipts))
+ 
+-	// Write response
+ 	w.Header().Set("Content-Type", "application/json")
+ 	if err := json.NewEncoder(w).Encode(receipts); err != nil {
+-		p.API.LogError("[API] Error encoding response",
++		p.logError("[API] Error encoding response",
+ 			"channel_id", channelID,
+ 			"error", err.Error())
+ 		http.Error(w, "Error encoding response", http.StatusInternalServerError)
+@@ -287,100 +216,37 @@ func (p *Plugin) HandleGetReceipts(w http.ResponseWriter, r *http.Request) {
+ 	}
+ }
+ 
+-func (p *Plugin) storeReadEvent(event ReadEvent) error {
+-	// Input validation
+-	if event.MessageID == "" || event.UserID == "" || event.Timestamp <= 0 {
+-		return fmt.Errorf("invalid read event: missing required fields or invalid timestamp")
+-	}
++func (p *Plugin) HandleGetConfig(w http.ResponseWriter, r *http.Request) {
++	w.Header().Set("Content-Type", "application/json")
+ 
+-	// Start transaction for consistency
+-	tx, err := p.DB.Begin()
+-	if err != nil {
+-		p.API.LogError("[DB] Failed to start transaction",
+-			"message_id", event.MessageID,
+-			"user_id", event.UserID,
+-			"error", err.Error())
+-		return fmt.Errorf("failed to start transaction: %w", err)
++	config := map[string]interface{}{
++		"visibility_threshold_ms": 2000, // Default value same as current hardcoded value
+ 	}
+-	defer tx.Rollback() // Will be no-op if transaction is committed
+-
+-	// Check if there's a more recent receipt already
+-	var existingTimestamp int64
+-	err = tx.QueryRow(
+-		"SELECT timestamp FROM read_events WHERE message_id = $1 AND user_id = $2",
+-		event.MessageID, event.UserID,
+-	).Scan(&existingTimestamp)
+ 
+-	if err == nil {
+-		if existingTimestamp >= event.Timestamp {
+-			// A more recent (or same) receipt already exists
+-			p.API.LogDebug("[DB] Skipping older receipt",
+-				"message_id", event.MessageID,
+-				"user_id", event.UserID,
+-				"existing_timestamp", existingTimestamp,
+-				"new_timestamp", event.Timestamp)
+-			return nil
+-		}
+-	} else if err != sql.ErrNoRows {
+-		// Unexpected error checking existing receipt
+-		p.API.LogError("[DB] Error checking existing receipt",
+-			"message_id", event.MessageID,
+-			"user_id", event.UserID,
+-			"error", err.Error())
+-		return fmt.Errorf("error checking existing receipt: %w", err)
++	if err := json.NewEncoder(w).Encode(config); err != nil {
++		p.logError("[API] Error encoding config response", "error", err.Error())
++		http.Error(w, "Error encoding response", http.StatusInternalServerError)
++		return
+ 	}
++}
+ 
+-	// Insert or update with new timestamp
+-	query := `
+-	INSERT INTO read_events (message_id, user_id, timestamp)
+-	VALUES ($1, $2, $3)
+-	ON CONFLICT (message_id, user_id)
+-	DO UPDATE SET timestamp = EXCLUDED.timestamp;
+-	`
+-
+-	p.API.LogDebug("[DB] Storing read receipt",
+-		"message_id", event.MessageID,
+-		"user_id", event.UserID,
+-		"timestamp", event.Timestamp)
+-
+-	result, err := tx.Exec(query, event.MessageID, event.UserID, event.Timestamp)
+-	if err != nil {
+-		p.API.LogError("[DB] Failed to store read receipt",
+-			"message_id", event.MessageID,
+-			"user_id", event.UserID,
+-			"error", err.Error())
+-		return fmt.Errorf("failed to store read receipt: %w", err)
++func (p *Plugin) storeReadEvent(event ReadEvent) error {
++	if event.MessageID == "" || event.UserID == "" || event.Timestamp <= 0 {
++		return fmt.Errorf("invalid read event: missing required fields or invalid timestamp")
+ 	}
+ 
+-	rowsAffected, err := result.RowsAffected()
+-	if err != nil {
+-		p.API.LogError("[DB] Failed to get rows affected",
+-			"message_id", event.MessageID,
+-			"user_id", event.UserID,
+-			"error", err.Error())
+-		return fmt.Errorf("failed to get rows affected: %w", err)
++	storeEvent := store.ReadEvent{
++		MessageID: event.MessageID,
++		UserID:    event.UserID,
++		Timestamp: event.Timestamp,
+ 	}
+ 
+-	// Commit the transaction
+-	if err := tx.Commit(); err != nil {
+-		p.API.LogError("[DB] Failed to commit transaction",
++	if err := p.store.Upsert(storeEvent); err != nil {
++		p.logError("[Store] Failed to store read event",
+ 			"message_id", event.MessageID,
+ 			"user_id", event.UserID,
+ 			"error", err.Error())
+-		return fmt.Errorf("failed to commit transaction: %w", err)
+-	}
+-
+-	if rowsAffected > 0 {
+-		p.API.LogDebug("[DB] Read receipt stored",
+-			"message_id", event.MessageID,
+-			"user_id", event.UserID,
+-			"timestamp", event.Timestamp,
+-			"rows_affected", rowsAffected)
+-	} else {
+-		p.API.LogDebug("[DB] No update needed (newer receipt exists)",
+-			"message_id", event.MessageID,
+-			"user_id", event.UserID,
+-			"timestamp", event.Timestamp)
++		return fmt.Errorf("failed to store read event: %w", err)
+ 	}
+ 
+ 	return nil
+diff --git a/server/config.go b/server/config.go
+index 731f733..4e8a7f1 100644
+--- a/server/config.go
++++ b/server/config.go
+@@ -1,35 +1,40 @@
+ package main
+ 
+ import (
++	"fmt"
+ 	"sync"
+ )
+ 
+-// Config holds the plugin configuration loaded from the System Console.
+-type Config struct {
+-	EnableReadReceipts bool
+-	EnableLogging      bool
++// Configuration represents the plugin's configuration
++type Configuration struct {
++	Enable                bool   `json:"enable"`
++	VisibilityThresholdMs int    `json:"visibility_threshold_ms"`
++	RetentionDays         int    `json:"retention_days"`
++	LogLevel              string `json:"log_level"`
+ }
+ 
+-// ReadReceiptPluginConfig is the global configuration instance.
+-var ReadReceiptPluginConfig = &Config{}
+-var configLock = &sync.RWMutex{}
+-
+-// OnConfigurationChange is called when the plugin configuration changes.
+-func (p *Plugin) OnConfigurationChange() error {
+-	config := &Config{}
+-
+-	// Load the configuration from the System Console.
+-	if err := p.API.LoadPluginConfiguration(config); err != nil {
+-		return err
++// getDefaultConfiguration returns the default configuration
++func getDefaultConfiguration() *Configuration {
++	return &Configuration{
++		Enable:                true,
++		VisibilityThresholdMs: 2000,
++		RetentionDays:         30,
++		LogLevel:              "info",
+ 	}
++}
+ 
+-	// Update the global configuration instance.
+-	configLock.Lock()
+-	defer configLock.Unlock()
+-	*ReadReceiptPluginConfig = *config
+-
+-	// Update the enableLogging variable based on the configuration.
+-	enableLogging = config.EnableLogging
+-
++// IsValid checks if the configuration is valid
++func (c *Configuration) IsValid() error {
++	if c.VisibilityThresholdMs < 0 {
++		return fmt.Errorf("visibility threshold must be non-negative")
++	}
++	if c.RetentionDays < 0 {
++		return fmt.Errorf("retention days must be non-negative")
++	}
++	if c.LogLevel != "debug" && c.LogLevel != "info" && c.LogLevel != "error" {
++		return fmt.Errorf("log level must be one of: debug, info, error")
++	}
+ 	return nil
+ }
++
++var configLock = &sync.RWMutex{}
+diff --git a/server/model.go b/server/model.go
+index 431938d..0ec5a72 100644
+--- a/server/model.go
++++ b/server/model.go
+@@ -1,20 +1,11 @@
+-//  server/model.go
++// server/model.go
+ package main
+ 
+-import (
+-	"database/sql"
+-	"log"
+-	"time"
+-)
+-
+-// Global flag for extra logging 
+-var enableLogging = true
+-
+ // ReadEvent represents a message read event in the DB.
+ type ReadEvent struct {
+-	MessageID string // ID of the message
+-	UserID    string // ID of the user who read the message
+-	Timestamp int64  // Unix timestamp (seconds) of when the message was read
++	MessageID string `json:"message_id"` // ID of the message
++	UserID    string `json:"user_id"`    // ID of the user who read the message
++	Timestamp int64  `json:"timestamp"`  // Unix timestamp (seconds) of when the message was read
+ }
+ 
+ // ReadRequest represents the JSON payload for the read receipt API.
+@@ -22,54 +13,7 @@ type ReadRequest struct {
+ 	MessageID string `json:"message_id"`
+ }
+ 
+-// CreateTableIfNotExists creates the read_events table if it does not already exist.
+-func CreateTableIfNotExists(db *sql.DB) error {
+-	start := time.Now()
+-	if enableLogging {
+-		log.Printf("[ReadReceipt][%s] Checking or creating 'read_events' table...", start.Format(time.RFC3339))
+-	}
+-
+-	query := `
+-	CREATE TABLE IF NOT EXISTS read_events (
+-		message_id TEXT NOT NULL,
+-		user_id TEXT NOT NULL,
+-		timestamp BIGINT NOT NULL,
+-		PRIMARY KEY (message_id, user_id)
+-	);
+-	`
+-	res, err := db.Exec(query)
+-	if err != nil {
+-		if enableLogging {
+-			log.Printf("[ReadReceipt][%s] ERROR creating 'read_events' table: %v", time.Now().Format(time.RFC3339), err)
+-		}
+-		return err
+-	}
+-
+-	if enableLogging {
+-		affected, _ := res.RowsAffected()
+-		log.Printf("[ReadReceipt][%s] 'read_events' table checked/created. Rows affected: %d", time.Now().Format(time.RFC3339), affected)
+-	}
+-	return nil
+-}
+-
+-// InsertReadEvent inserts or updates a read event (idempotent upsert).
+-func InsertReadEvent(db *sql.DB, event *ReadEvent) error {
+-	if enableLogging {
+-		log.Printf("[ReadReceipt][%s] Inserting read event: message_id=%s, user_id=%s, timestamp=%d",
+-			time.Now().Format(time.RFC3339), event.MessageID, event.UserID, event.Timestamp)
+-	}
+-
+-	query := `
+-		INSERT INTO read_events (message_id, user_id, timestamp)
+-		VALUES ($1, $2, $3)
+-		ON CONFLICT (message_id, user_id)
+-		DO UPDATE SET timestamp = EXCLUDED.timestamp;
+-	`
+-	_, err := db.Exec(query, event.MessageID, event.UserID, event.Timestamp)
+-	if err != nil {
+-		if enableLogging {
+-			log.Printf("[ReadReceipt][%s] ERROR inserting read event: %v", time.Now().Format(time.RFC3339), err)
+-		}
+-	}
+-	return err
++// ReadResponse represents the response payload for read receipt queries.
++type ReadResponse struct {
++	Events []ReadEvent `json:"events"`
+ }
+diff --git a/server/plugin.go b/server/plugin.go
+index 414b0c8..663ee50 100644
+--- a/server/plugin.go
++++ b/server/plugin.go
+@@ -4,89 +4,190 @@ package main
+ 
+ import (
+ 	"database/sql"
+-	"os"
++	"fmt"
++	"time"
+ 
++	_ "github.com/go-sql-driver/mysql"
+ 	_ "github.com/lib/pq"
++	"github.com/mattermost/mattermost-server/v6/model"
+ 	"github.com/mattermost/mattermost-server/v6/plugin"
++
++	"github.com/arg/mattermost-readreceipts/server/store"
+ )
+ 
+ type Plugin struct {
+ 	plugin.MattermostPlugin
+-	DB            *sql.DB
+-	enableLogging bool
++	store  store.ReceiptStore
++	conf   *Configuration
++	stopCh chan struct{}
+ }
+ 
+-func (p *Plugin) OnActivate() error {
+-	// Enable logging by default in development
+-	p.enableLogging = true
++func (p *Plugin) getConfiguration() *Configuration {
++	configLock.RLock()
++	defer configLock.RUnlock()
++	if p.conf == nil {
++		return getDefaultConfiguration()
++	}
++	return p.conf
++}
++
++func (p *Plugin) OnConfigurationChange() error {
++	configuration := new(Configuration)
+ 
+-	p.API.LogDebug("[Plugin] Activating read receipts plugin...")
++	// Load the public configuration fields from the Mattermost server configuration.
++	if err := p.API.LoadPluginConfiguration(configuration); err != nil {
++		return fmt.Errorf("failed to load plugin configuration: %w", err)
++	}
+ 
+-	// Get database connection string
+-	dsn := os.Getenv("MM_SQLSETTINGS_DATASOURCE")
+-	if dsn == "" {
+-		dsn = "postgres://mmuser:mostest@db:5432/mattermost?sslmode=disable"
+-		p.API.LogDebug("[Plugin] Using default database connection string")
++	if err := configuration.IsValid(); err != nil {
++		return fmt.Errorf("invalid configuration: %w", err)
+ 	}
+ 
+-	p.API.LogDebug("[Plugin] Connecting to database...")
++	configLock.Lock()
++	defer configLock.Unlock()
++	p.conf = configuration
++
++	return nil
++}
++
++func (p *Plugin) OnActivate() error {
++	if err := p.OnConfigurationChange(); err != nil {
++		return fmt.Errorf("failed to load configuration: %w", err)
++	}
++
++	// Check if plugin is enabled in configuration
++	if !p.getConfiguration().Enable {
++		p.logInfo("[Plugin] Plugin disabled via configuration")
++		return nil
++	}
++
++	p.logDebug("[Plugin] Activating read receipts plugin...")
++
++	// Get database driver type from Mattermost config
++	driverName := *p.API.GetConfig().SqlSettings.DriverName
++
++	// Get database connection string from environment or use default
++	dsn := p.API.GetConfig().SqlSettings.DataSource
++	if dsn == nil || *dsn == "" {
++		dsn = model.NewString("postgres://mmuser:mostest@db:5432/mattermost?sslmode=disable")
++		p.logDebug("[Plugin] Using default database connection string")
++	}
+ 
+ 	// Open database connection
+-	db, err := sql.Open("postgres", dsn)
++	db, err := sql.Open(driverName, *dsn)
+ 	if err != nil {
+-		p.API.LogError("[Plugin] Failed to connect to database", "error", err.Error())
+-		return err
++		p.logError("[Plugin] Failed to connect to database", "error", err.Error())
++		return fmt.Errorf("failed to connect to database: %w", err)
+ 	}
+ 
+-	// Test the connection
+-	if err := db.Ping(); err != nil {
+-		p.API.LogError("[Plugin] Failed to ping database", "error", err.Error())
+-		return err
++	// Initialize the appropriate store based on the driver
++	switch driverName {
++	case model.DatabaseDriverMysql:
++		p.store = store.NewMySQLStore(db)
++		p.logDebug("[Plugin] Using MySQL store")
++	case model.DatabaseDriverPostgres:
++		p.store = store.NewPostgresStore(db)
++		p.logDebug("[Plugin] Using PostgreSQL store")
++	default:
++		return fmt.Errorf("unsupported database driver: %s", driverName)
+ 	}
+ 
+-	p.DB = db
+-	p.API.LogInfo("[Plugin] Database connection established")
++	// Initialize the store (create tables, indexes, etc)
++	if err := p.store.Initialize(); err != nil {
++		p.logError("[Plugin] Failed to initialize store", "error", err.Error())
++		return fmt.Errorf("failed to initialize store: %w", err)
++	}
+ 
+-	// Initialize database schema
+-	if err := p.initializeDatabase(); err != nil {
+-		p.API.LogError("[Plugin] Failed to initialize database", "error", err.Error())
+-		return err
++	if p.getConfiguration().LogLevel != "error" {
++		p.logInfo("[Plugin] Read receipts plugin activated successfully")
+ 	}
+ 
+-	p.API.LogInfo("[Plugin] Read receipts plugin activated successfully")
++	// Initialize cleanup goroutine
++	p.stopCh = make(chan struct{})
++	go func() {
++		t := time.NewTicker(24 * time.Hour)
++		defer t.Stop()
++
++		for {
++			select {
++			case <-t.C:
++				if p.conf.RetentionDays > 0 {
++					if err := p.store.CleanupOlderThan(p.conf.RetentionDays); err != nil {
++						p.logError("[Plugin] Failed to cleanup old receipts", "error", err.Error())
++					}
++				}
++			case <-p.stopCh:
++				return
++			}
++		}
++	}()
++
+ 	return nil
+ }
+ 
+-func (p *Plugin) OnDeactivate() error {
+-	if p.DB != nil {
+-		p.API.LogInfo("[Plugin] Closing database connection")
+-		if err := p.DB.Close(); err != nil {
+-			p.API.LogError("[Plugin] Error closing database connection", "error", err.Error())
+-			return err
+-		}
++// Example of how to use the store interface for database operations
++func (p *Plugin) StoreReadReceipt(messageID, userID string, timestamp int64) error {
++	event := store.ReadEvent{
++		MessageID: messageID,
++		UserID:    userID,
++		Timestamp: timestamp,
++	}
++
++	if err := p.store.Upsert(event); err != nil {
++		p.logDebug("Failed to store read receipt",
++			"messageID", messageID,
++			"userID", userID,
++			"error", err.Error())
++		return fmt.Errorf("failed to store read receipt: %w", err)
+ 	}
+ 	return nil
+ }
+ 
+-func (p *Plugin) initializeDatabase() error {
+-	p.API.LogDebug("[Plugin] Initializing database schema...")
++func (p *Plugin) GetChannelReceipts(channelID, excludeUserID string) ([]store.ReadEvent, error) {
++	events, err := p.store.GetByChannel(channelID, excludeUserID)
++	if err != nil {
++		p.logDebug("Failed to get channel receipts",
++			"channelID", channelID,
++			"error", err.Error())
++		return nil, fmt.Errorf("failed to get channel receipts: %w", err)
++	}
++	return events, nil
++}
++
++func (p *Plugin) CleanupOldReceipts() error {
++	if err := p.store.CleanupOlderThan(p.getConfiguration().RetentionDays); err != nil {
++		p.logDebug("Failed to cleanup old receipts",
++			"retentionDays", p.getConfiguration().RetentionDays,
++			"error", err.Error())
++		return fmt.Errorf("failed to cleanup old receipts: %w", err)
++	}
++	return nil
++}
+ 
+-	// Create the read_events table
+-	query := `
+-	CREATE TABLE IF NOT EXISTS read_events (
+-		message_id TEXT NOT NULL,
+-		user_id TEXT NOT NULL,
+-		timestamp BIGINT NOT NULL,
+-		PRIMARY KEY (message_id, user_id)
+-	);
+-	CREATE INDEX IF NOT EXISTS idx_read_events_message_id ON read_events(message_id);
+-	CREATE INDEX IF NOT EXISTS idx_read_events_user_id ON read_events(user_id);
+-	`
++func (p *Plugin) OnDeactivate() error {
++	p.logDebug("[Plugin] Deactivating read receipts plugin...")
+ 
+-	if _, err := p.DB.Exec(query); err != nil {
+-		return err
++	// Stop the cleanup goroutine
++	if p.stopCh != nil {
++		close(p.stopCh)
++		p.stopCh = nil
+ 	}
+ 
+-	p.API.LogInfo("[Plugin] Database schema initialized")
+ 	return nil
+ }
++
++func (p *Plugin) logDebug(msg string, kv ...interface{}) {
++	if p.conf.LogLevel == "debug" {
++		p.API.LogDebug(msg, kv...)
++	}
++}
++
++func (p *Plugin) logInfo(msg string, kv ...interface{}) {
++	if p.conf.LogLevel == "info" || p.conf.LogLevel == "debug" {
++		p.API.LogInfo(msg, kv...)
++	}
++}
++
++func (p *Plugin) logError(msg string, kv ...interface{}) {
++	p.API.LogError(msg, kv...)
++}
+diff --git a/webapp/components/VisibilityTracker.tsx b/webapp/components/VisibilityTracker.tsx
+index 44ac88c..0006ec0 100644
+--- a/webapp/components/VisibilityTracker.tsx
++++ b/webapp/components/VisibilityTracker.tsx
+@@ -2,6 +2,7 @@
+ 
+ import React, { FC, ReactElement, useEffect, useRef, useState } from 'react';
+ import debounce from 'lodash.debounce';
++import { visibilityThresholdMs } from '../store';
+ 
+ interface VisibilityTrackerProps {
+     messageId: string;
+@@ -162,10 +163,10 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId, postAuthorId
+ 
+         if (visibilityStartTime.current && !hasSent) {
+             const visibilityDuration = Date.now() - visibilityStartTime.current;
+-            if (visibilityDuration >= 2000) {
++            if (visibilityDuration >= visibilityThresholdMs) {
+                 console.log(`⌛ [VisibilityTracker] Visibility threshold reached for ${messageId}:`, {
+                     duration: visibilityDuration,
+-                    threshold: 2000
++                    threshold: visibilityThresholdMs
+                 });
+                 sendReadReceipt();
+                 resetVisibilityTimer();
+diff --git a/webapp/plugin.tsx b/webapp/plugin.tsx
+index 593c4a8..94ef4da 100644
+--- a/webapp/plugin.tsx
++++ b/webapp/plugin.tsx
+@@ -4,7 +4,7 @@ import React from 'react';
+ import {PluginRegistry} from 'mattermost-webapp/plugins/registry';
+ import PostReceipt from './components/PostReceipt';
+ import {handleWebSocketEvent, initializeWebSocket} from './websocket';
+-import {setMattermostStore, loadInitialReceipts} from './store';
++import {setMattermostStore, loadInitialReceipts, fetchPluginConfig} from './store';
+ import ReadReceiptRootObserver from './components/ReadReceiptRootObserver';
+ 
+ interface WebSocketMessage {
+@@ -33,6 +33,13 @@ export default class ReadReceiptPlugin {
+         // Set the Mattermost store reference for our plugin
+         setMattermostStore(store);
+         
++        // Fetch plugin configuration
++        try {
++            await fetchPluginConfig();
++        } catch (error) {
++            console.error('❌ [ReadReceiptPlugin] Failed to fetch plugin config:', error);
++        }
++        
+         // Initialize WebSocket
+         console.log('🔌 [ReadReceiptPlugin] Initializing WebSocket...');
+         const socket = initializeWebSocket();
+diff --git a/webapp/store.ts b/webapp/store.ts
+index 60ecaaf..631d906 100644
+--- a/webapp/store.ts
++++ b/webapp/store.ts
+@@ -202,3 +202,22 @@ export const loadInitialReceipts = async (channelId: string): Promise<void> => {
+ 
+ // Export event name for components
+ export const RECEIPT_STORE_UPDATE = STORE_UPDATE_EVENT;
++
++export let visibilityThresholdMs = 2000;
++
++export async function fetchPluginConfig(): Promise<void> {
++    try {
++        const response = await fetch('/plugins/mattermost-readreceipts/api/v1/config');
++        if (!response.ok) {
++            throw new Error(`HTTP error! status: ${response.status}`);
++        }
++        const config = await response.json();
++        if (typeof config.visibility_threshold_ms === 'number') {
++            visibilityThresholdMs = config.visibility_threshold_ms;
++            console.log('⚙️ [Store] Updated visibility threshold:', visibilityThresholdMs);
++        }
++    } catch (error) {
++        console.error('❌ [Store] Failed to fetch plugin config:', error);
++        // Keep default value on error
++    }
++}

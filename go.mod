@@ -7,6 +7,7 @@ go 1.20
 require github.com/mattermost/mattermost-server/v6 v6.7.2 // latest stable 6.x
 
 require (
+	github.com/go-sql-driver/mysql v1.6.0
 	github.com/gorilla/mux v1.8.1
 	github.com/lib/pq v1.10.4
 	github.com/stretchr/testify v1.7.1
@@ -20,7 +21,6 @@ require (
 	github.com/fatih/color v1.13.0 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
 	github.com/go-asn1-ber/asn1-ber v1.5.3 // indirect
-	github.com/go-sql-driver/mysql v1.6.0 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect

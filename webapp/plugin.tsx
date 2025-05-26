@@ -4,7 +4,7 @@ import React from 'react';
 import {PluginRegistry} from 'mattermost-webapp/plugins/registry';
 import PostReceipt from './components/PostReceipt';
 import {handleWebSocketEvent, initializeWebSocket} from './websocket';
-import {setMattermostStore, loadInitialReceipts} from './store';
+import {setMattermostStore, loadInitialReceipts, fetchPluginConfig} from './store';
 import ReadReceiptRootObserver from './components/ReadReceiptRootObserver';
 
 interface WebSocketMessage {
@@ -32,6 +32,13 @@ export default class ReadReceiptPlugin {
         
         // Set the Mattermost store reference for our plugin
         setMattermostStore(store);
+        
+        // Fetch plugin configuration
+        try {
+            await fetchPluginConfig();
+        } catch (error) {
+            console.error('❌ [ReadReceiptPlugin] Failed to fetch plugin config:', error);
+        }
         
         // Initialize WebSocket
         console.log('🔌 [ReadReceiptPlugin] Initializing WebSocket...');

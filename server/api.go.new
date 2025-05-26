@@ -6,24 +6,31 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/arg/mattermost-readreceipts/server/store"
 	"github.com/gorilla/mux"
 	"github.com/mattermost/mattermost-server/v6/model"
 	"github.com/mattermost/mattermost-server/v6/plugin"
+	"github.com/arg/mattermost-readreceipts/server/store"
 )
 
-// Using model.ReadRequest and model.ReadEvent defined in model.go
+type ReadRequest struct {
+	MessageID string `json:"message_id"`
+}
+
+type ReadEvent struct {
+	MessageID string `json:"message_id"`
+	UserID    string `json:"user_id"`
+	Timestamp int64  `json:"timestamp"`
+}
 
 func (p *Plugin) ServeHTTP(c *plugin.Context, w http.ResponseWriter, r *http.Request) {
 	router := mux.NewRouter()
 
 	router.Handle("/api/v1/read", p.MattermostAuthorizationRequired(http.HandlerFunc(p.HandleReadReceipt))).Methods("POST")
 	router.Handle("/api/v1/receipts", p.MattermostAuthorizationRequired(http.HandlerFunc(p.HandleGetReceipts))).Methods("GET")
-	router.Handle("/api/v1/config", p.MattermostAuthorizationRequired(http.HandlerFunc(p.HandleGetConfig))).Methods("GET")
 	router.Handle("/api/v1/debug/ping", http.HandlerFunc(p.HandlePing)).Methods("GET")
 	router.Handle("/api/v1/debug/db", p.MattermostAuthorizationRequired(http.HandlerFunc(p.HandleDBCheck))).Methods("GET")
 
-	p.logDebug("[API] Received request",
+	p.API.LogDebug("[API] Received request",
 		"path", r.URL.Path,
 		"method", r.Method,
 		"user_agent", r.UserAgent(),
@@ -42,7 +49,7 @@ func (p *Plugin) MattermostAuthorizationRequired(next http.Handler) http.Handler
 			userID = r.Header.Get("Mattermost-User-ID")
 		}
 		if userID == "" {
-			p.logError("[API] Unauthorized request", "path", r.URL.Path, "method", r.Method)
+			p.API.LogError("[API] Unauthorized request", "path", r.URL.Path, "method", r.Method)
 			http.Error(w, "Not authorized", http.StatusUnauthorized)
 			return
 		}
@@ -62,14 +69,14 @@ func (p *Plugin) HandlePing(w http.ResponseWriter, r *http.Request) {
 
 func (p *Plugin) HandleDBCheck(w http.ResponseWriter, r *http.Request) {
 	if p.store == nil {
-		p.logError("[DB] Store not initialized")
+		p.API.LogError("[DB] Store not initialized")
 		http.Error(w, "Database not initialized", http.StatusInternalServerError)
 		return
 	}
 
 	_, err := p.store.GetByChannel("test", "test")
 	if err != nil {
-		p.logError("[DB] Database check failed", "error", err.Error())
+		p.API.LogError("[DB] Database check failed", "error", err.Error())
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
@@ -87,7 +94,7 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 		userID = r.Header.Get("Mattermost-User-ID")
 	}
 
-	p.logDebug("[API] Processing read receipt request",
+	p.API.LogDebug("[API] Processing read receipt request",
 		"user_id", userID,
 		"content_type", r.Header.Get("Content-Type"),
 		"content_length", r.ContentLength,
@@ -96,7 +103,7 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 
 	var req ReadRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		p.logError("[API] Failed to decode request body",
+		p.API.LogError("[API] Failed to decode request body",
 			"error", err.Error(),
 			"content_type", r.Header.Get("Content-Type"),
 		)
@@ -105,7 +112,7 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.MessageID == "" {
-		p.logError("[API] Missing message_id in request")
+		p.API.LogError("[API] Missing message_id in request")
 		http.Error(w, "Missing message_id", http.StatusBadRequest)
 		return
 	}
@@ -114,12 +121,12 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 	post, err := p.API.GetPost(req.MessageID)
 	if err == nil {
 		channelId = post.ChannelId
-		p.logInfo("[API] Processing read receipt",
+		p.API.LogInfo("[API] Processing read receipt",
 			"message_id", req.MessageID,
 			"user_id", userID,
 			"channel_id", channelId)
 	} else {
-		p.logInfo("[API] GetPost failed, will broadcast globally",
+		p.API.LogWarn("[API] GetPost failed, will broadcast globally",
 			"message_id", req.MessageID,
 			"error", err.Error())
 	}
@@ -131,7 +138,7 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := p.storeReadEvent(readEvent); err != nil {
-		p.logError("[API] Failed to store read event",
+		p.API.LogError("[API] Failed to store read event",
 			"message_id", readEvent.MessageID,
 			"user_id", readEvent.UserID,
 			"error", err.Error())
@@ -146,7 +153,7 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 	if channelId != "" {
 		logFields = append(logFields, "channel_id", channelId)
 	}
-	p.logInfo("[API] Read receipt stored successfully", logFields...)
+	p.API.LogInfo("[API] Read receipt stored successfully", logFields...)
 
 	broadcast := &model.WebsocketBroadcast{}
 	if channelId != "" {
@@ -167,7 +174,7 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 	if channelId != "" {
 		broadcastType = "channel"
 	}
-	p.logDebug("[API] Read receipt broadcast",
+	p.API.LogDebug("[API] Read receipt broadcast",
 		"message_id", readEvent.MessageID,
 		"user_id", readEvent.UserID,
 		"channel_id", channelId,
@@ -184,51 +191,35 @@ func (p *Plugin) HandleGetReceipts(w http.ResponseWriter, r *http.Request) {
 
 	channelID := r.URL.Query().Get("channel_id")
 	if channelID == "" {
-		p.logError("[API] Missing channel_id parameter")
+		p.API.LogError("[API] Missing channel_id parameter")
 		http.Error(w, "Missing channel_id parameter", http.StatusBadRequest)
 		return
 	}
 
-	p.logDebug("[API] Fetching channel receipts",
+	p.API.LogDebug("[API] Fetching channel receipts",
 		"channel_id", channelID,
 		"user_id", userID)
 
 	receipts, err := p.store.GetByChannel(channelID, userID)
 	if err != nil {
-		p.logError("[API] Failed to fetch receipts",
+		p.API.LogError("[API] Failed to fetch receipts",
 			"channel_id", channelID,
 			"error", err.Error())
 		http.Error(w, "Failed to fetch receipts", http.StatusInternalServerError)
 		return
 	}
 
-	p.logDebug("[API] Returning receipts",
+	p.API.LogDebug("[API] Returning receipts",
 		"channel_id", channelID,
 		"count", len(receipts))
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(receipts); err != nil {
-		p.logError("[API] Error encoding response",
+		p.API.LogError("[API] Error encoding response",
 			"channel_id", channelID,
 			"error", err.Error())
 		http.Error(w, "Error encoding response", http.StatusInternalServerError)
 		return
-	}
-}
-
-func (p *Plugin) HandleGetConfig(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	conf := p.getConfiguration()
-	cfg := map[string]interface{}{
-		"visibility_threshold_ms": conf.VisibilityThresholdMs,
-		"retention_days":          conf.RetentionDays,
-		"log_level":               conf.LogLevel,
-	}
-
-	if err := json.NewEncoder(w).Encode(cfg); err != nil {
-		p.logError("[API] Error encoding config response", "error", err.Error())
-		http.Error(w, "Error encoding response", http.StatusInternalServerError)
 	}
 }
 
@@ -244,7 +235,7 @@ func (p *Plugin) storeReadEvent(event ReadEvent) error {
 	}
 
 	if err := p.store.Upsert(storeEvent); err != nil {
-		p.logError("[Store] Failed to store read event",
+		p.API.LogError("[Store] Failed to store read event",
 			"message_id", event.MessageID,
 			"user_id", event.UserID,
 			"error", err.Error())
