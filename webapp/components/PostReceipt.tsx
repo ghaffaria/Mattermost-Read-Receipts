@@ -141,8 +141,21 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
         };
     }, [messageId]);
 
-    // Filter out both current user and post author from the seen-by list
-    const seenByOthers = seenBy.filter(id => id !== post.user_id);
+    // Always filter out the current user from seen by list
+    // In your own messages, show who has seen it
+    // In others' messages, only show if the author has seen it
+    const seenByOthers = seenBy.filter(id => {
+        // Don't show yourself in seen-by list
+        if (id === currentUserId) return false;
+        
+        if (isOwnMessage) {
+            // In your messages, show everyone who has seen it
+            return true;
+        } else {
+            // In others' messages, only show if you've seen it
+            return false;
+        }
+    });
     const seenByOthersDisplay = seenByOthers.map(userId => getUserDisplayName(userId));
 
     console.log('👀 [PostReceipt] Preparing display:', {

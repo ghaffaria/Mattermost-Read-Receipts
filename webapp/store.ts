@@ -188,10 +188,11 @@ export const loadInitialReceipts = async (channelId: string): Promise<void> => {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
 
-        const receipts: Receipt[] = await response.json();
+        const data = await response.json();
+        const receipts: Receipt[] = Array.isArray(data) ? data : [];
         console.log('📥 [Store] Received receipts:', {
             channelId,
-            count: receipts.length,
+            count: receipts?.length ?? 0,
             receipts
         });
 
