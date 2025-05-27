@@ -13,3 +13,11 @@ type ReadEvent struct {
 type ReadRequest struct {
 	MessageID string `json:"message_id"`
 }
+
+// ChannelRead represents the latest read status for a user in a channel
+type ChannelRead struct {
+	ChannelID  string
+	UserID     string
+	LastPostID string
+	LastSeenAt int64
+}

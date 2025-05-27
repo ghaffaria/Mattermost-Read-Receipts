@@ -77,24 +77,24 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({
             hasCSRF: !!csrfToken
         });
 
-        try {
-            const response = await fetch('/plugins/mattermost-readreceipts/api/v1/read', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-Token': csrfToken,
-                    'Mattermost-User-Id': currentUserId
-                },
-                credentials: 'same-origin',
-                body: JSON.stringify({ 
-                    message_id: messageId,
-                    channel_id: channelId,
-                    debug: {
-                        timestamp: new Date().toISOString(),
-                        source: 'visibility_tracker',
-                        visibilityDuration: visibilityStartTime.current ? Date.now() - visibilityStartTime.current : 0
-                    }
-                }),
+        try {        const response = await fetch('/plugins/mattermost-readreceipts/api/v1/read', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken,
+                'Mattermost-User-Id': currentUserId
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify({ 
+                message_id: messageId,
+                channel_id: channelId,
+                timestamp: Date.now(),
+                debug: {
+                    timestamp: new Date().toISOString(),
+                    source: 'visibility_tracker',
+                    visibilityDuration: visibilityStartTime.current ? Date.now() - visibilityStartTime.current : 0
+                }
+            }),
             });
 
             if (response.ok) {

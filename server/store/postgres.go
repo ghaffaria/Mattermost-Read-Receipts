@@ -4,7 +4,10 @@ package store
 
 import (
 	"database/sql"
+	"fmt"
 	"time"
+
+	"github.com/arg/mattermost-readreceipts/server/types"
 )
 
 type PostgresStore struct {
@@ -146,4 +149,68 @@ func (s *PostgresStore) GetReadersSince(channelID string, sinceMs int64, exclude
 		userIDs = append(userIDs, userID)
 	}
 	return userIDs, rows.Err()
+}
+
+func (s *PostgresStore) BeginTx() (Tx, error) {
+	return s.db.Begin()
+}
+
+func (s *PostgresStore) UpsertTx(tx Tx, event ReadEvent) error {
+	sqlTx, ok := tx.(*sql.Tx)
+	if !ok {
+		return fmt.Errorf("invalid transaction type")
+	}
+
+	query := `
+		INSERT INTO read_events (message_id, user_id, channel_id, timestamp)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (message_id, user_id) DO UPDATE SET
+		timestamp = GREATEST(read_events.timestamp, EXCLUDED.timestamp)
+	`
+	_, err := sqlTx.Exec(query, event.MessageID, event.UserID, event.ChannelID, event.Timestamp)
+	return err
+}
+
+func (s *PostgresStore) UpsertChannelReadTx(tx Tx, read types.ChannelRead) error {
+	sqlTx, ok := tx.(*sql.Tx)
+	if !ok {
+		return fmt.Errorf("invalid transaction type")
+	}
+
+	query := `
+		INSERT INTO channel_reads (channel_id, user_id, last_post_id, last_seen_at)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (channel_id, user_id) DO UPDATE SET
+		last_post_id = CASE
+			WHEN channel_reads.last_seen_at < EXCLUDED.last_seen_at THEN EXCLUDED.last_post_id
+			ELSE channel_reads.last_post_id
+		END,
+		last_seen_at = GREATEST(channel_reads.last_seen_at, EXCLUDED.last_seen_at)
+	`
+	_, err := sqlTx.Exec(query, read.ChannelID, read.UserID, read.LastPostID, read.LastSeenAt)
+	return err
+}
+
+func (s *PostgresStore) GetChannelReads(channelID string) ([]types.ChannelRead, error) {
+	query := `
+		SELECT channel_id, user_id, last_post_id, last_seen_at
+		FROM channel_reads
+		WHERE channel_id = $1
+		ORDER BY last_seen_at DESC
+	`
+	rows, err := s.db.Query(query, channelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var reads []types.ChannelRead
+	for rows.Next() {
+		var read types.ChannelRead
+		if err := rows.Scan(&read.ChannelID, &read.UserID, &read.LastPostID, &read.LastSeenAt); err != nil {
+			return nil, err
+		}
+		reads = append(reads, read)
+	}
+	return reads, rows.Err()
 }

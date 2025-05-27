@@ -4,7 +4,7 @@ import React from 'react';
 import {PluginRegistry} from 'mattermost-webapp/plugins/registry';
 import PostReceipt from './components/PostReceipt';
 import {handleWebSocketEvent, initializeWebSocket} from './websocket';
-import {setMattermostStore, loadInitialReceipts, fetchPluginConfig} from './store';
+import {setMattermostStore, loadInitialReceipts, fetchPluginConfig, loadChannelReads} from './store';
 import ReadReceiptRootObserver from './components/ReadReceiptRootObserver';
 
 interface WebSocketMessage {
@@ -54,7 +54,11 @@ export default class ReadReceiptPlugin {
                         console.log('👀 [ReadReceiptPlugin] Channels viewed:', channelIds);
                         for (const channelId of channelIds) {
                             try {
-                                await loadInitialReceipts(channelId);
+                                // Load both receipts and channel reads
+                                await Promise.all([
+                                    loadInitialReceipts(channelId),
+                                    loadChannelReads(channelId)
+                                ]);
                             } catch (error) {
                                 console.error('❌ [ReadReceiptPlugin] Failed to load receipts:', {
                                     channelId,

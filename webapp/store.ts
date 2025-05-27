@@ -23,6 +23,9 @@ let mattermostStore: Store<MattermostState> | null = null;
 // Use Map instead of plain object for better mutability
 const receiptMap = new Map<string, Set<string>>();
 
+// Map to store channel read states
+const channelReadsMap = new Map<string, Map<string, {lastPostId: string, lastSeenAt: number}>>();
+
 export const setMattermostStore = (store: Store<MattermostState> | null) => {
     if (!store) {
         console.error('❌ [Store] Attempted to initialize with null store');
@@ -167,13 +170,169 @@ interface Receipt {
     timestamp: number;
 }
 
+interface ChannelRead {
+    channel_id: string;
+    user_id: string;
+    last_post_id: string;
+    last_seen_at: number;
+}
+
 export const loadInitialReceipts = async (channelId: string): Promise<void> => {
     console.log('🔄 [Store] Loading receipts for channel:', channelId);
     
     try {
-        // Fetch receipts from API
+        // Fetch both receipts and channel reads in parallel
+        const [receiptsResponse, readsResponse] = await Promise.all([
+            fetch(
+                `/plugins/mattermost-readreceipts/api/v1/receipts?channel_id=${encodeURIComponent(channelId)}&since=0`,
+                {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    credentials: 'include'
+                }
+            ),
+            fetch(
+                `/plugins/mattermost-readreceipts/api/v1/channel/${encodeURIComponent(channelId)}/reads`,
+                {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    credentials: 'include'
+                }
+            )
+        ]);
+
+        if (!receiptsResponse.ok || !readsResponse.ok) {
+            throw new Error(`HTTP error! receipts: ${receiptsResponse.status}, reads: ${readsResponse.status}`);
+        }
+
+        // Process both responses
+        const [messageReceipts, channelReads] = await Promise.all([
+            receiptsResponse.json() as Promise<Receipt[]>,
+            readsResponse.json() as Promise<ChannelRead[]>
+        ]);
+
+        console.log('📥 [Store] Received data:', {
+            channelId,
+            messageReceiptsCount: messageReceipts.length,
+            channelReadsCount: channelReads.length
+        });
+
+        // Update channel reads map
+        const channelReadersMap = new Map<string, {lastPostId: string, lastSeenAt: number}>();
+        for (const read of channelReads) {
+            channelReadersMap.set(read.user_id, {
+                lastPostId: read.last_post_id,
+                lastSeenAt: read.last_seen_at
+            });
+        }
+        channelReadsMap.set(channelId, channelReadersMap);
+
+        // Process message receipts
+        const messageReceiptsMap = new Map<string, Set<string>>();
+        for (const receipt of messageReceipts) {
+            const users = messageReceiptsMap.get(receipt.message_id) || new Set<string>();
+            users.add(receipt.user_id);
+            messageReceiptsMap.set(receipt.message_id, users);
+        }
+
+        // Merge channel reads into message receipts
+        const store = getMattermostStore() as Store<MattermostStateWithPosts> | null;
+        const posts = store?.getState()?.entities?.posts?.posts || {};
+        
+        Object.entries(posts).forEach(([postId, post]) => {
+            if (post.channel_id === channelId) {
+                const existingReaders = messageReceiptsMap.get(postId) || new Set<string>();
+                channelReadersMap.forEach((read, userId) => {
+                    // Add user to post readers if they've read up to this post
+                    if (read.lastSeenAt >= post.create_at) {
+                        existingReaders.add(userId);
+                    }
+                });
+                messageReceiptsMap.set(postId, existingReaders);
+            }
+        });
+
+        // Update receipt map with merged data
+        messageReceiptsMap.forEach((users, messageId) => {
+            receiptMap.set(messageId, users);
+        });
+
+        console.log('💾 [Store] Updated maps:', {
+            channelId,
+            messageCount: messageReceiptsMap.size,
+            messages: Array.from(messageReceiptsMap.keys())
+        });
+
+        // Dispatch event to trigger rerenders
+        const event = new CustomEvent(STORE_UPDATE_EVENT, {
+            detail: {
+                type: 'receipts_loaded',
+                channelId,
+                messageCount: messageReceiptsMap.size,
+                receipts: Array.from(messageReceiptsMap.entries()).map(([msgId, users]) => ({
+                    messageId: msgId,
+                    users: Array.from(users)
+                }))
+            }
+        });
+
+        window.dispatchEvent(event);
+        
+        console.log('📢 [Store] Dispatched store update event:', {
+            type: 'receipts_loaded',
+            channelId,
+            messageCount: messageReceiptsMap.size
+        });
+
+    } catch (error) {
+        console.error('❌ [Store] Failed to load channel data:', {
+            channelId,
+            error
+        });
+        throw error;
+    }
+};
+
+interface Post extends Record<string, any> {
+    id: string;
+    channel_id: string;
+    create_at: number;
+    user_id: string;
+}
+
+interface MattermostStateWithPosts extends MattermostState {
+    entities: {
+        users: {
+            profiles: Record<string, MattermostUser>;
+        };
+        posts: {
+            posts: Record<string, Post>;
+        };
+    };
+}
+
+// Map to store channel read states
+const channelReadMap = new Map<string, Map<string, {lastPostId: string, lastSeenAt: number}>>();
+
+interface ChannelRead {
+    channel_id: string;
+    user_id: string;
+    last_post_id: string;
+    last_seen_at: number;
+}
+
+export const loadChannelReads = async (channelId: string): Promise<void> => {
+    try {
+        console.log('📖 [Store] Loading channel reads:', channelId);
+        
         const response = await fetch(
-            `/plugins/mattermost-readreceipts/api/v1/receipts?channel_id=${encodeURIComponent(channelId)}&since=0`,
+            `/plugins/mattermost-readreceipts/api/v1/channel/${channelId}/reads`,
             {
                 method: 'GET',
                 headers: {
@@ -188,59 +347,65 @@ export const loadInitialReceipts = async (channelId: string): Promise<void> => {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
 
-        const data = await response.json();
-        const receipts: Receipt[] = Array.isArray(data) ? data : [];
-        console.log('📥 [Store] Received receipts:', {
-            channelId,
-            count: receipts?.length ?? 0,
-            receipts
-        });
-
-        // Group receipts by message
-        const messageReceipts = new Map<string, Set<string>>();
-        for (const receipt of receipts) {
-            const users = messageReceipts.get(receipt.message_id) || new Set<string>();
-            users.add(receipt.user_id);
-            messageReceipts.set(receipt.message_id, users);
+        const reads: ChannelRead[] = await response.json();
+        
+        // Initialize channel map if needed
+        if (!channelReadMap.has(channelId)) {
+            channelReadMap.set(channelId, new Map());
         }
-
-        // Update receipt map
-        messageReceipts.forEach((users, messageId) => {
-            receiptMap.set(messageId, users);
+        
+        const channelReads = channelReadMap.get(channelId)!;
+        
+        // Update channel reads
+        reads.forEach(read => {
+            channelReads.set(read.user_id, {
+                lastPostId: read.last_post_id,
+                lastSeenAt: read.last_seen_at
+            });
         });
 
-        console.log('💾 [Store] Updated receipt map:', {
-            channelId,
-            messageCount: messageReceipts.size,
-            messages: Array.from(messageReceipts.keys())
-        });
+        // Get posts from Mattermost store
+        const store = getMattermostStore() as Store<MattermostStateWithPosts> | null;
+        const posts = store?.getState()?.entities?.posts?.posts || {};
 
-        // Dispatch event to trigger rerenders
-        const event = new CustomEvent(STORE_UPDATE_EVENT, {
-            detail: {
-                type: 'receipts_loaded',
-                channelId,
-                messageCount: messageReceipts.size,
-                receipts: Array.from(messageReceipts.entries()).map(([msgId, users]) => ({
-                    messageId: msgId,
-                    users: Array.from(users)
-                }))
+        // Update receipt map based on channel reads
+        Object.entries(posts).forEach(([postId, post]) => {
+            if (post.channel_id === channelId) {
+                const postReaders = new Set<string>();
+                channelReads.forEach((read, userId) => {
+                    // Add user to post readers if they've read up to this post
+                    if (read.lastSeenAt >= post.create_at) {
+                        postReaders.add(userId);
+                    }
+                });
+                receiptMap.set(postId, postReaders);
             }
         });
 
-        window.dispatchEvent(event);
-        
-        console.log('📢 [Store] Dispatched store update event:', {
-            type: 'receipts_loaded',
+        console.log('✅ [Store] Channel reads loaded:', {
             channelId,
-            messageCount: messageReceipts.size
+            readsCount: channelReads.size,
+            updatedPosts: Array.from(receiptMap.keys())
         });
+
+        // Trigger UI update
+        const event = new CustomEvent(STORE_UPDATE_EVENT, {
+            detail: {
+                type: 'channel_reads_loaded',
+                channelId,
+                reads: Array.from(channelReads.entries()).map(([userId, read]) => ({
+                    userId,
+                    ...read
+                }))
+            }
+        });
+        window.dispatchEvent(event);
+
     } catch (error) {
-        console.error('❌ [Store] Failed to load receipts:', {
+        console.error('❌ [Store] Failed to load channel reads:', {
             channelId,
             error
         });
-        throw error;
     }
 };
 

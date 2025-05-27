@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/arg/mattermost-readreceipts/server/store"
+	"github.com/arg/mattermost-readreceipts/server/types"
 	"github.com/gorilla/mux"
 	"github.com/mattermost/mattermost-server/v6/plugin"
 )
@@ -19,6 +20,7 @@ func (p *Plugin) ServeHTTP(c *plugin.Context, w http.ResponseWriter, r *http.Req
 
 	router.Handle("/api/v1/read", p.MattermostAuthorizationRequired(http.HandlerFunc(p.HandleReadReceipt))).Methods("POST")
 	router.Handle("/api/v1/channel/{channelID}/readers", p.MattermostAuthorizationRequired(http.HandlerFunc(p.HandleGetChannelReaders))).Methods("GET")
+	router.Handle("/api/v1/channel/{channelID}/reads", p.MattermostAuthorizationRequired(http.HandlerFunc(p.HandleGetChannelReads))).Methods("GET")
 	router.Handle("/api/v1/receipts", p.MattermostAuthorizationRequired(http.HandlerFunc(p.HandleGetReceipts))).Methods("GET")
 	router.Handle("/api/v1/config", p.MattermostAuthorizationRequired(http.HandlerFunc(p.HandleGetConfig))).Methods("GET")
 	router.Handle("/api/v1/debug/ping", http.HandlerFunc(p.HandlePing)).Methods("GET")
@@ -128,14 +130,51 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 	event := store.ReadEvent{
 		MessageID: req.MessageID,
 		UserID:    userID,
+		ChannelID: channelID,
 		Timestamp: now,
 	}
 
-	if err := p.store.Upsert(event); err != nil {
+	// Begin transaction
+	tx, txErr := p.store.BeginTx()
+	if txErr != nil {
+		p.logError("[API] Failed to begin transaction", "error", txErr.Error())
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Store read receipt
+	if err := p.store.UpsertTx(tx, event); err != nil {
 		p.logError("[API] Failed to store read receipt",
 			"message_id", req.MessageID,
 			"user_id", userID,
 			"channel_id", channelID,
+			"error", err.Error(),
+		)
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Update channel read status
+	channelRead := types.ChannelRead{
+		ChannelID:  channelID,
+		UserID:     userID,
+		LastPostID: req.MessageID,
+		LastSeenAt: now,
+	}
+	if err := p.store.UpsertChannelReadTx(tx, channelRead); err != nil {
+		p.logError("[API] Failed to update channel read",
+			"channel_id", channelID,
+			"user_id", userID,
+			"error", err.Error(),
+		)
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		p.logError("[API] Failed to commit transaction",
 			"error", err.Error(),
 		)
 		http.Error(w, "Internal error", http.StatusInternalServerError)
@@ -307,6 +346,41 @@ func (p *Plugin) HandleGetChannelReaders(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		return
 	}
+}
+
+// HandleGetChannelReads returns all read receipts for a channel
+func (p *Plugin) HandleGetChannelReads(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	channelID := vars["channelID"]
+
+	if channelID == "" {
+		http.Error(w, "Missing channel_id", http.StatusBadRequest)
+		return
+	}
+
+	userID := r.Header.Get("Mattermost-User-Id")
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	p.logDebug("[API] Getting channel reads",
+		"channel_id", channelID,
+		"user_id", userID,
+	)
+
+	reads, err := p.store.GetChannelReads(channelID)
+	if err != nil {
+		p.logError("[API] Failed to get channel reads",
+			"channel_id", channelID,
+			"error", err.Error(),
+		)
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(reads)
 }
 
 // Helper function to resolve timestamp in milliseconds since epoch
