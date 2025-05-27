@@ -70,18 +70,15 @@ export const getReadReceipts = (): Record<string, string[]> => {
 
 export const getMessageReadReceipts = (messageId: string): string[] => {
     const users = receiptMap.get(messageId);
-    const receipts = users ? Array.from(users) : [];
-    
-    console.log('👀 [Store] Getting receipts for message:', {
-        messageId,
-        receipts,
-        allMessages: Array.from(receiptMap.keys())
-    });
-    
-    return receipts;
+    return users ? Array.from(users) : [];
 };
 
 export const updateReadReceipts = (messageId: string, userId: string): void => {
+    if (!messageId || !userId) {
+        console.error('❌ [Store] Invalid receipt update:', { messageId, userId });
+        return;
+    }
+
     console.log('✏️ [Store] Updating receipts:', {
         messageId,
         userId,
@@ -102,6 +99,18 @@ export const updateReadReceipts = (messageId: string, userId: string): void => {
             userId,
             afterState: Array.from(users)
         });
+
+        // Dispatch event to trigger UI updates
+        const event = new CustomEvent(STORE_UPDATE_EVENT, {
+            detail: {
+                type: 'receipt_added',
+                receipts: [{
+                    messageId,
+                    users: Array.from(users)
+                }]
+            }
+        });
+        window.dispatchEvent(event);
     } else {
         console.log('ℹ️ [Store] Receipt already exists:', {
             messageId,

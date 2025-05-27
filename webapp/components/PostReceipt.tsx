@@ -142,9 +142,7 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
     }, [messageId]);
 
     // Filter out both current user and post author from the seen-by list
-    const seenByOthers = seenBy.filter(id => 
-        id !== currentUserId && id !== post.user_id
-    );
+    const seenByOthers = seenBy.filter(id => id !== post.user_id);
     const seenByOthersDisplay = seenByOthers.map(userId => getUserDisplayName(userId));
 
     console.log('👀 [PostReceipt] Preparing display:', {
