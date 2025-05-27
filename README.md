@@ -105,10 +105,16 @@ make dev                       # live-reload plugin inside the container
 * `GET …/plugins/mattermost-readreceipts/api/v1/debug/db`
 
 ### Read Status Endpoints
-* `GET …/plugins/mattermost-readreceipts/api/v1/receipts` - Get per-post read statuses for a channel
-* `GET …/plugins/mattermost-readreceipts/api/v1/channel/{channelID}/readers` - Get channel-level read status
-* `GET …/plugins/mattermost-readreceipts/api/v1/read/channel/{channelID}` - Get readers since a specific time
-* `POST …/plugins/mattermost-readreceipts/api/v1/read` - Mark a post as read
+
+* `GET …/plugins/mattermost-readreceipts/api/v1/receipts?channel_id={channelID}&since={timestamp}` - Get per-post read statuses for a channel. `since` (milliseconds) filter is required; use `0` to fetch all.
+* `GET …/plugins/mattermost-readreceipts/api/v1/channel/{channelID}/readers` - Get channel-level read status (all users with any read receipt).
+* `GET …/plugins/mattermost-readreceipts/api/v1/read/channel/{channelID}?since={timestamp}` - Get readers in a channel since a specific time (ms) or use `postID` parameter to base on a post’s timestamp.
+* `POST …/plugins/mattermost-readreceipts/api/v1/read` - Mark a post as read; body must include `message_id` and optional `channel_id` (will auto-detect if omitted).
+
+### WebSocket Events
+
+* `custom_mattermost-readreceipts_read_receipt` - Emitted when a message is read. Payload: `{ message_id, user_id, channel_id, timestamp }`.
+* `custom_mattermost-readreceipts_channel_readers` - Emitted on channel-level updates. Payload: `{ channel_id, last_post_id, user_ids }`.
 
 All reader endpoints return a consistent JSON response with a `user_ids` array containing the IDs of users who have read the content.
 
