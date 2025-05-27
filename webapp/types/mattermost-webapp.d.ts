@@ -16,6 +16,7 @@ declare module 'mattermost-webapp/plugins/registry' {
 declare global {
     interface Window {
         registerPlugin: (id: string, plugin: any) => void;
+        store: any;
     }
 }
 
@@ -30,6 +31,12 @@ export interface Post {
     id: string;
     type?: string;
     user_id: string;
+    channel_id: string;
+    root_id?: string;
+    props?: Record<string, any>;
+    create_at?: number;
+    update_at?: number;
+    delete_at?: number;
 }
 
 // Extend window interface for Mattermost globals

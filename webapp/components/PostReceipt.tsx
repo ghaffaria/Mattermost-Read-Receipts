@@ -2,7 +2,6 @@
 import React, { FC, ReactElement, useEffect, useState } from 'react';
 import { getMessageReadReceipts, getUserDisplayName, RECEIPT_STORE_UPDATE } from '../store';
 import VisibilityTracker from './VisibilityTracker';
-
 import { Post } from '../types/mattermost-webapp';
 
 interface PostReceiptProps {
@@ -33,11 +32,17 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
     console.log('🔄 [PostReceipt] Rendering:', {
         postId: post?.id,
         hasPost: !!post,
+        channelId: post?.channel_id,
         timestamp: new Date().toISOString()
     });
 
-    if (!post?.id) {
-        console.warn('⚠️ [PostReceipt] Invalid post:', post);
+    // Validate required post properties
+    if (!post?.id || !post?.user_id || !post?.channel_id) {
+        console.warn('⚠️ [PostReceipt] Invalid post:', {
+            id: post?.id,
+            userId: post?.user_id,
+            channelId: post?.channel_id
+        });
         return null;
     }
 
@@ -45,6 +50,11 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
     const [seenBy, setSeenBy] = useState<string[]>([]);
     const currentUserId = document.cookie.match(/MMUSERID=([^;]+)/)?.[1] || 
                          window.localStorage.getItem('MMUSERID') || '';
+
+    if (!currentUserId) {
+        console.warn('⚠️ [PostReceipt] No current user ID found');
+        return null;
+    }
 
     // Check if this is the user's own message
     const isOwnMessage = post.user_id === currentUserId;
@@ -94,7 +104,7 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
         return () => {
             window.removeEventListener(RECEIPT_STORE_UPDATE, handleStoreUpdate);
         };
-    }, [messageId]);
+    }, [messageId, currentUserId, isOwnMessage]);
 
     // Handle WebSocket events
     useEffect(() => {
@@ -147,7 +157,6 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
         timestamp: new Date().toISOString()
     });
 
-    // Always render the container for the sender to see others, but never add VisibilityTracker for own messages
     return (
         <div 
             className="post-receipt-container" 
@@ -157,7 +166,14 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
             data-author-id={post.user_id}
         >
             {/* Never include VisibilityTracker for own messages */}
-            {!isOwnMessage && <VisibilityTracker messageId={messageId} postAuthorId={post.user_id} key={`tracker-${messageId}`} />}
+            {!isOwnMessage && (
+    <VisibilityTracker 
+        messageId={messageId} 
+        postAuthorId={post.user_id}
+        channelId={post.channel_id}
+        key={`tracker-${messageId}`}
+    />
+)}
             
             {seenByOthers.length > 0 && (
                 <div 

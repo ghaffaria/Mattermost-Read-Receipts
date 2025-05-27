@@ -1,15 +1,21 @@
 // webapp/components/VisibilityTracker.tsx
-
 import React, { FC, ReactElement, useEffect, useRef, useState } from 'react';
 import debounce from 'lodash.debounce';
-import { visibilityThresholdMs } from '../store';
+import { visibilityThresholdMs, updateReadReceipts } from '../store';
 
 interface VisibilityTrackerProps {
     messageId: string;
     postAuthorId: string;
+    channelId: string;
+    onVisible?: (messageId: string) => void;
 }
 
-const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId, postAuthorId }): ReactElement => {
+const VisibilityTracker: FC<VisibilityTrackerProps> = ({ 
+    messageId, 
+    postAuthorId,
+    channelId, 
+    onVisible 
+}): ReactElement => {
     const observerRef = useRef<IntersectionObserver | null>(null);
     const elementRef = useRef<HTMLDivElement | null>(null);
     const [hasSent, setHasSent] = useState(false);
@@ -28,9 +34,7 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId, postAuthorId
         }
         
         if (!userId) {
-            console.error('❌ [VisibilityTracker] Missing MMUSERID in both localStorage and cookies');
-        } else {
-            console.log('✅ [VisibilityTracker] Found userId:', userId);
+            console.error('❌ [VisibilityTracker] Missing MMUSERID');
         }
         
         return userId || '';
@@ -68,11 +72,9 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId, postAuthorId
 
         console.log(`📤 [VisibilityTracker] Preparing to send read receipt:`, {
             messageId,
+            channelId,
             userId: currentUserId,
-            hasCSRF: !!csrfToken,
-            cookieUserId: document.cookie.match(/MMUSERID=([^;]+)/)?.[1],
-            localStorageUserId: window.localStorage.getItem('MMUSERID'),
-            visibilityDuration: visibilityStartTime.current ? Date.now() - visibilityStartTime.current : 0
+            hasCSRF: !!csrfToken
         });
 
         try {
@@ -86,6 +88,7 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId, postAuthorId
                 credentials: 'same-origin',
                 body: JSON.stringify({ 
                     message_id: messageId,
+                    channel_id: channelId,
                     debug: {
                         timestamp: new Date().toISOString(),
                         source: 'visibility_tracker',
@@ -94,35 +97,18 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId, postAuthorId
                 }),
             });
 
-            console.log(`📨 [VisibilityTracker] Server response:`, {
-                status: response.status,
-                ok: response.ok,
-                text: await response.text(),
-                requestHeaders: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-Token': csrfToken ? '(present)' : '(missing)',
-                    'Mattermost-User-Id': currentUserId
-                }
-            });
-
             if (response.ok) {
                 console.log(`✅ [VisibilityTracker] Read receipt sent successfully for ${messageId}`);
                 setHasSent(true);
+                updateReadReceipts(messageId, currentUserId);
+                onVisible?.(messageId);
             } else {
                 throw new Error(`Server returned ${response.status}`);
             }
         } catch (error) {
             console.error(`❌ [VisibilityTracker] Failed to send receipt:`, {
                 messageId,
-                error: error instanceof Error ? error.message : String(error),
-                requestUrl: '/plugins/mattermost-readreceipts/api/v1/read',
-                userId: currentUserId,
-                csrfToken: csrfToken ? '(present)' : '(missing)',
-                cookieInfo: document.cookie ? {
-                    hasMmUserId: !!document.cookie.match(/MMUSERID=/),
-                    hasCsrf: !!document.cookie.match(/MMCSRF=/),
-                    allCookies: document.cookie.split(';').map(c => c.trim().split('=')[0])
-                } : '(no cookies)'
+                error: error instanceof Error ? error.message : String(error)
             });
         }
     };
@@ -176,29 +162,23 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId, postAuthorId
 
     const handleVisibilityChange = debounce((entries: IntersectionObserverEntry[]) => {
         const entry = entries[0];
-        const isNowVisible = entry.isIntersecting && entry.intersectionRatio >= 0.5;
         const isTabActive = document.visibilityState === 'visible';
+        const isNowVisible = entry.isIntersecting;
         
-        console.log(`👁️ [VisibilityTracker] Visibility changed:`, {
-            messageId,
-            isIntersecting: entry.isIntersecting,
-            ratio: entry.intersectionRatio,
+        console.log(`👁️ [VisibilityTracker] Visibility changed for ${messageId}:`, {
             isVisible: isNowVisible,
-            isTabActive,
-            hasSent,
-            visibilityStartTime: visibilityStartTime.current,
-            userId: getUserId()
+            visibility: Math.round(entry.intersectionRatio * 100) + '%',
+            isTabActive
         });
 
-        // Only start timer if both message and tab are visible
-        if (isNowVisible && isTabActive && !visibilityStartTime.current && !hasSent) {
-            console.log(`⏳ [VisibilityTracker] Starting visibility timer for ${messageId}`);
-            visibilityStartTime.current = Date.now();
-            if (timerRef.current) {
-                clearInterval(timerRef.current);
+        // Start tracking time when message becomes visible
+        if (isNowVisible && isTabActive) {
+            if (!visibilityStartTime.current) {
+                console.log(`⏱️ [VisibilityTracker] Starting visibility timer for ${messageId}`);
+                visibilityStartTime.current = Date.now();
+                timerRef.current = setInterval(checkVisibilityDuration, 1000);
             }
-            timerRef.current = setInterval(checkVisibilityDuration, 100);
-        } else if (!isNowVisible || !isTabActive) {
+        } else {
             console.log(`⏱️ [VisibilityTracker] Resetting visibility timer for ${messageId} (visible: ${isNowVisible}, tab active: ${isTabActive})`);
             resetVisibilityTimer();
         }
@@ -250,6 +230,7 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({ messageId, postAuthorId
             style={{ width: '100%', height: '10px', opacity: 0 }}
             data-testid="visibility-tracker"
             data-message-id={messageId}
+            data-channel-id={channelId}
             data-component="visibility-tracker"
         />
     );

@@ -18,17 +18,39 @@ interface MattermostState {
     };
 }
 
-let mattermostStore: Store<MattermostState>;
+let mattermostStore: Store<MattermostState> | null = null;
 
 // Use Map instead of plain object for better mutability
 const receiptMap = new Map<string, Set<string>>();
 
-export const setMattermostStore = (store: Store<MattermostState>) => {
-    mattermostStore = store;
-    console.log('🔌 [Store] Initialized with Mattermost store:', {
-        hasStore: !!store,
-        userProfiles: Object.keys(store.getState().entities.users.profiles).length
-    });
+export const setMattermostStore = (store: Store<MattermostState> | null) => {
+    if (!store) {
+        console.error('❌ [Store] Attempted to initialize with null store');
+        return;
+    }
+    try {
+        // Validate store has expected structure
+        const state = store.getState();
+        if (!state?.entities?.users?.profiles) {
+            console.error('❌ [Store] Invalid store structure:', state);
+            return;
+        }
+
+        mattermostStore = store;
+        console.log('✅ [Store] Initialized with Mattermost store:', {
+            hasStore: true,
+            userProfiles: Object.keys(state.entities.users.profiles).length
+        });
+    } catch (error) {
+        console.error('❌ [Store] Failed to initialize store:', error);
+    }
+};
+
+export const getMattermostStore = (): Store<MattermostState> | null => {
+    if (!mattermostStore) {
+        console.warn('⚠️ [Store] Attempted to access uninitialized store');
+    }
+    return mattermostStore;
 };
 
 export const getReadReceipts = (): Record<string, string[]> => {
@@ -40,8 +62,7 @@ export const getReadReceipts = (): Record<string, string[]> => {
     
     console.log('📖 [Store] Getting all read receipts:', {
         messageCount: receiptMap.size,
-        messages: Array.from(receiptMap.keys()),
-        state: receipts
+        messages: Array.from(receiptMap.keys())
     });
     
     return receipts;
@@ -90,7 +111,17 @@ export const updateReadReceipts = (messageId: string, userId: string): void => {
 };
 
 export const getUserProfiles = (): Record<string, MattermostUser> => {
-    const profiles = mattermostStore.getState().entities.users.profiles;
+    if (!mattermostStore) {
+        console.error('❌ [Store] Cannot get user profiles: store not initialized');
+        return {};
+    }
+
+    const profiles = mattermostStore.getState()?.entities?.users?.profiles;
+    if (!profiles) {
+        console.error('❌ [Store] Cannot get user profiles: invalid store structure');
+        return {};
+    }
+
     console.log('👥 [Store] Getting user profiles:', {
         count: Object.keys(profiles).length,
         users: Object.keys(profiles).map(id => ({
@@ -132,14 +163,17 @@ export const loadInitialReceipts = async (channelId: string): Promise<void> => {
     
     try {
         // Fetch receipts from API
-        const response = await fetch(`/plugins/mattermost-readreceipts/api/v1/receipts?channel_id=${encodeURIComponent(channelId)}`, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Requested-With': 'XMLHttpRequest'
-            },
-            credentials: 'include'
-        });
+        const response = await fetch(
+            `/plugins/mattermost-readreceipts/api/v1/receipts?channel_id=${encodeURIComponent(channelId)}&since=0`,
+            {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                credentials: 'include'
+            }
+        );
 
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);

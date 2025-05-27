@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "types": ["react", "react-dom", "./types/mattermost-webapp"],
+    "types": ["react", "react-dom", "./types/mattermost-webapp", "jest"],
     "target": "ES6",
     "module": "NodeNext",
     "lib": ["DOM", "ESNext"],

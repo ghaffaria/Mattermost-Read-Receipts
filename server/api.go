@@ -9,7 +9,6 @@ import (
 
 	"github.com/arg/mattermost-readreceipts/server/store"
 	"github.com/gorilla/mux"
-	"github.com/mattermost/mattermost-server/v6/model"
 	"github.com/mattermost/mattermost-server/v6/plugin"
 )
 
@@ -99,94 +98,64 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 
 	var req ReadRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		p.logError("[API] Failed to decode request body",
-			"error", err.Error(),
-			"content_type", r.Header.Get("Content-Type"),
-		)
-		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		p.logError("[API] Failed to decode request body", "error", err.Error())
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
+	// Validate request
 	if req.MessageID == "" {
 		p.logError("[API] Missing message_id in request")
-		http.Error(w, "Missing message_id", http.StatusBadRequest)
+		http.Error(w, "message_id is required", http.StatusBadRequest)
 		return
 	}
 
-	var channelId string
+	// Get post to verify channel_id if not provided
 	post, err := p.API.GetPost(req.MessageID)
-	if err == nil {
-		channelId = post.ChannelId
-		p.logInfo("[API] Processing read receipt",
-			"message_id", req.MessageID,
-			"user_id", userID,
-			"channel_id", channelId)
-
-		// Update channel-level read receipt
-		if err := p.store.UpsertChannelRead(channelId, userID, post.Id, post.CreateAt); err != nil {
-			p.logError("[API] Failed to upsert channel read",
-				"channel_id", channelId,
-				"user_id", userID,
-				"post_id", post.Id,
-				"error", err.Error())
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-	} else {
-		p.logInfo("[API] GetPost failed, will broadcast globally",
-			"message_id", req.MessageID,
-			"error", err.Error())
+	if err != nil {
+		p.logError("[API] Failed to get post", "message_id", req.MessageID, "error", err.Error())
+		http.Error(w, "Invalid message_id", http.StatusBadRequest)
+		return
 	}
 
-	readEvent := ReadEvent{
+	channelID := req.ChannelID
+	if channelID == "" {
+		channelID = post.ChannelId
+	}
+
+	// Store the read receipt
+	now := time.Now().Unix()
+	event := store.ReadEvent{
 		MessageID: req.MessageID,
 		UserID:    userID,
-		Timestamp: time.Now().Unix(),
+		Timestamp: now,
 	}
 
-	if err := p.storeReadEvent(readEvent); err != nil {
-		p.logError("[API] Failed to store read event",
-			"message_id", readEvent.MessageID,
-			"user_id", readEvent.UserID,
-			"error", err.Error())
-		w.WriteHeader(http.StatusNoContent)
+	if err := p.store.Upsert(event); err != nil {
+		p.logError("[API] Failed to store read receipt",
+			"message_id", req.MessageID,
+			"user_id", userID,
+			"channel_id", channelID,
+			"error", err.Error(),
+		)
+		http.Error(w, "Internal error", http.StatusInternalServerError)
 		return
 	}
 
-	logFields := []interface{}{
-		"message_id", readEvent.MessageID,
-		"user_id", readEvent.UserID,
-	}
-	if channelId != "" {
-		logFields = append(logFields, "channel_id", channelId)
-	}
-	p.logInfo("[API] Read receipt stored successfully", logFields...)
-
-	broadcast := &model.WebsocketBroadcast{}
-	if channelId != "" {
-		broadcast.ChannelId = channelId
+	// Update channel read status
+	if err := p.store.UpsertChannelRead(channelID, userID, req.MessageID, now*1000); err != nil {
+		p.logError("[API] Failed to update channel read status",
+			"channel_id", channelID,
+			"user_id", userID,
+			"error", err.Error(),
+		)
+		// Don't fail the request, just log the error
 	}
 
-	p.API.PublishWebSocketEvent(
-		"custom_mattermost-readreceipts_read_receipt",
-		map[string]interface{}{
-			"message_id": readEvent.MessageID,
-			"user_id":    readEvent.UserID,
-			"timestamp":  readEvent.Timestamp,
-		},
-		broadcast,
-	)
+	// Broadcast receipt via WebSocket
+	p.PublishReadReceipt(channelID, req.MessageID, userID, now)
 
-	broadcastType := "global"
-	if channelId != "" {
-		broadcastType = "channel"
-	}
-	p.logDebug("[API] Read receipt broadcast",
-		"message_id", readEvent.MessageID,
-		"user_id", readEvent.UserID,
-		"channel_id", channelId,
-		"broadcast_type", broadcastType)
-
+	// Return success
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -363,26 +332,4 @@ func (p *Plugin) getSinceMillis(r *http.Request) (int64, error) {
 	}
 
 	return 0, fmt.Errorf("missing since or postID")
-}
-
-func (p *Plugin) storeReadEvent(event ReadEvent) error {
-	if event.MessageID == "" || event.UserID == "" || event.Timestamp <= 0 {
-		return fmt.Errorf("invalid read event: missing required fields or invalid timestamp")
-	}
-
-	storeEvent := store.ReadEvent{
-		MessageID: event.MessageID,
-		UserID:    event.UserID,
-		Timestamp: event.Timestamp,
-	}
-
-	if err := p.store.Upsert(storeEvent); err != nil {
-		p.logError("[Store] Failed to store read event",
-			"message_id", event.MessageID,
-			"user_id", event.UserID,
-			"error", err.Error())
-		return fmt.Errorf("failed to store read event: %w", err)
-	}
-
-	return nil
 }

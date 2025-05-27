@@ -4,6 +4,20 @@ import ReactDOM from 'react-dom';
 import PostReceipt from './PostReceipt';
 import { Post } from '../types/mattermost-webapp';
 
+interface MattermostState {
+    entities: {
+        posts: {
+            posts: {
+                [postId: string]: {
+                    id: string;
+                    user_id: string;
+                    channel_id: string;
+                };
+            };
+        };
+    };
+}
+
 const getAuthorId = (postId: string): string => {
     const state = (window as any).store?.getState?.();
     const post = state?.entities?.posts?.posts?.[postId];
@@ -62,14 +76,25 @@ const ReadReceiptRootObserver: React.FC = () => {
 
             // Get post author_id from Redux store
             const authorId = getAuthorId(postId);
+            // Get channel_id from Redux store
+            const state = (window as any).store?.getState?.();
+            const post = state?.entities?.posts?.posts?.[postId];
+            const channelId = post?.channel_id;
+
             console.log('🎨 [RootObserver] Rendering PostReceipt for:', {
                 postId,
                 authorId,
+                channelId,
                 source: 'redux_store'
             });
 
+            if (!channelId) {
+                console.warn('⚠️ [RootObserver] Could not find channel_id for post:', postId);
+                return;
+            }
+
             ReactDOM.render(
-                <PostReceipt post={{ id: postId, user_id: authorId }} />,
+                <PostReceipt post={{ id: postId, user_id: authorId, channel_id: channelId }} />,
                 receiptContainer
             );
         }
