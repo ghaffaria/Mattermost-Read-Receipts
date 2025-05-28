@@ -59,6 +59,8 @@ sequenceDiagram
     S->>WS: Broadcast to channel
     WS->>C: Update UI
 ```Read Receipts Plugin
+
+
 ## Download
 
 [⬇️ Download pre-built plugin](https://github.com/ghaffaria/Mattermost-Read-Receipts/releases/download/v0.1.2/mattermost-readreceipts-2025.05.26.1827.tar.gz)

@@ -35,58 +35,68 @@ export const store = configureStore({
     devTools: isDevelopment
 });
 
+// Store initialization status
+let storeInitialized = false;
+
+// Ensure store is initialized
+export const ensureStoreInitialized = () => {
+    if (!storeInitialized) {
+        console.error('❌ [Store] Attempting to use store before initialization');
+        throw new Error('Store not initialized');
+    }
+};
+
 // Export the RootState and AppDispatch types from the store
 export type RootState = ReturnType<typeof store.getState>;
 export type AppDispatch = typeof store.dispatch;
 
-// Initialize stores
-let isStoreInitialized = false;
+// Initialize stores with retry logic
 let initializationPromise: Promise<void> | null = null;
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 1000;
 
 export const setMattermostStore = async (mattermostStore: Store<any>): Promise<void> => {
-    if (!mattermostStore?.getState) {
-        console.error('❌ [Store] Invalid Mattermost store provided');
-        throw new Error('Invalid Mattermost store');
-    }
-
-    if (isStoreInitialized) {
-        console.log('ℹ️ [Store] Store already initialized');
-        return;
-    }
-
     if (initializationPromise) {
-        console.log('⏳ [Store] Waiting for existing initialization...');
         return initializationPromise;
     }
 
-    initializationPromise = new Promise<void>((resolve, reject) => {
-        try {
-            // Validate Mattermost store has expected structure
-            const state = mattermostStore.getState();
-            if (!state?.entities?.users?.profiles) {
-                throw new Error('Invalid Mattermost store structure');
+    initializationPromise = new Promise(async (resolve, reject) => {
+        let retryCount = 0;
+
+        const initializeStore = async () => {
+            try {
+                if (!mattermostStore?.getState) {
+                    throw new Error('Invalid Mattermost store');
+                }
+
+                // Initialize legacy store first
+                await setLegacyMattermostStore(mattermostStore);
+
+                // Get initial user profiles
+                const state = mattermostStore.getState();
+                const userProfiles = state?.entities?.users?.profiles || {};
+                const profileCount = Object.keys(userProfiles).length;
+
+                console.log('🔌 [Store] Initialized with Mattermost store:', {
+                    hasStore: !!mattermostStore,
+                    userProfiles: profileCount
+                });
+
+                storeInitialized = true;
+                resolve();
+            } catch (error) {
+                if (retryCount < MAX_RETRIES) {
+                    retryCount++;
+                    console.warn(`⚠️ [Store] Initialization failed, retrying (${retryCount}/${MAX_RETRIES})...`);
+                    setTimeout(initializeStore, RETRY_DELAY);
+                } else {
+                    console.error('❌ [Store] Failed to initialize after retries:', error);
+                    reject(error);
+                }
             }
+        };
 
-            // Set the store in legacy implementation
-            setLegacyMattermostStore(mattermostStore);
-
-            // Mark as initialized
-            isStoreInitialized = true;
-
-            // Log store initialization
-            console.log('✅ [Store] Initialized stores:', {
-                mattermost: true,
-                plugin: true,
-                profiles: Object.keys(state.entities.users.profiles).length
-            });
-
-            resolve();
-        } catch (error) {
-            console.error('❌ [Store] Failed to initialize store:', error);
-            isStoreInitialized = false;
-            initializationPromise = null;
-            reject(error);
-        }
+        await initializeStore();
     });
 
     return initializationPromise;
