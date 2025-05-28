@@ -21,6 +21,7 @@ export default class ReadReceiptPlugin {
         console.log('🔌 [ReadReceiptPlugin] Initializing...');
         
         try {
+            console.log('DEBUG: Calling setMattermostStore with:', mattermostStore);
             if (!mattermostStore?.getState) {
                 console.error('❌ [ReadReceiptPlugin] Invalid Mattermost store:', mattermostStore);
                 throw new Error('Invalid Mattermost store provided');
@@ -64,13 +65,16 @@ export default class ReadReceiptPlugin {
             }
 
             // Register wrapped root component
-            registry.registerRootComponent(() => (
-                <ErrorBoundary>
-                    <Provider store={store}>
-                        <ReadReceiptRootObserver />
-                    </Provider>
-                </ErrorBoundary>
-            ));
+            registry.registerRootComponent(() => {
+                console.log('DEBUG: Plugin Store for ReadReceiptRootObserver Provider:', store);
+                return (
+                    <ErrorBoundary>
+                        <Provider store={store}>
+                            <ReadReceiptRootObserver />
+                        </Provider>
+                    </ErrorBoundary>
+                );
+            });
 
             // Register post component with error boundary
             try {
@@ -78,6 +82,7 @@ export default class ReadReceiptPlugin {
                     console.log('🧩 [ReadReceiptPlugin] Registering post component...');
                     (registry as any).registerPostTypeComponent(
                         (props: PostProps) => {
+                            console.log('DEBUG: Plugin Store for PostReceipt Provider:', store);
                             if (!props?.post?.id || props.post.type !== '') {
                                 return null;
                             }

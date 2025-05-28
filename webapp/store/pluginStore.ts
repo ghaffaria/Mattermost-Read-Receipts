@@ -103,6 +103,7 @@ export const getStore = (): EnhancedStore => {
 
 // Initialize the store singleton
 export const store = getStore();
+console.log('DEBUG: pluginStore.ts - Store created:', store);
 
 // Helper to check store initialization
 export const isStoreInitialized = () => {
@@ -127,6 +128,7 @@ export const ensureStoreInitialized = () => {
 let initializationPromise: Promise<void> | null = null;
 
 export const setMattermostStore = async (mattermostStore: Store<any>): Promise<void> => {
+    console.log('DEBUG: setMattermostStore called. Mattermost store valid:', !!(mattermostStore && mattermostStore.getState));
     if (initializationPromise) {
         return initializationPromise;
     }
@@ -155,17 +157,13 @@ export const setMattermostStore = async (mattermostStore: Store<any>): Promise<v
 
                 // Mark store as initialized
                 storeInitialized = true;
+                console.log('DEBUG: storeInitialized set to true. Profiles count:', profileCount);
                 localStorage.setItem(STORE_INITIALIZED_KEY, 'true');
                 resolve();
             } catch (error) {
-                if (retryCount < MAX_RETRIES) {
-                    retryCount++;
-                    console.warn(`⚠️ [Store] Initialization failed, retrying (${retryCount}/${MAX_RETRIES})...`);
-                    setTimeout(initializeStore, RETRY_DELAY);
-                } else {
-                    console.error('❌ [Store] Failed to initialize after retries:', error);
-                    reject(error);
-                }
+                console.error('DEBUG: Error in setMattermostStore, storeInitialized remains false:', error);
+                storeInitialized = false; // Ensure it's false on error
+                reject(error);
             }
         };
 

@@ -19,7 +19,13 @@ interface MattermostState {
 }
 
 const getAuthorId = (postId: string): string => {
-    const state = (window as any).store?.getState?.();
+    const mmGlobalStore = (window as any).store;
+    console.log('DEBUG: [RootObserver] window.store for postId', postId, 'is', mmGlobalStore ? 'available' : 'NOT AVAILABLE');
+    if (!mmGlobalStore) {
+        return '';
+    }
+
+    const state = mmGlobalStore.getState();
     const post = state?.entities?.posts?.posts?.[postId];
     console.log('🔍 [RootObserver] Getting author from store:', {
         postId,

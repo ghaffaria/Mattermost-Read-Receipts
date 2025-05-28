@@ -1,5 +1,5 @@
 // webapp/components/PostReceipt.tsx
-import React, { FC, ReactElement, useEffect, useState } from 'react';
+import React, { FC, ReactElement } from 'react';
 import { useSelector } from 'react-redux';
 import { getUserDisplayName, RECEIPT_STORE_UPDATE } from '../store';
 import { selectReaders } from '../store/channelReaders';
@@ -13,10 +13,15 @@ interface PostReceiptProps {
 }
 
 const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
+    console.log('DEBUG: PostReceipt rendering, calling ensureStoreInitialized...');
     try {
-        // Ensure store is initialized before rendering
         ensureStoreInitialized();
+        console.log('DEBUG: ensureStoreInitialized succeeded.');
+    } catch (e) {
+        console.error('DEBUG: ensureStoreInitialized failed:', e);
+    }
 
+    try {
         // Early returns for invalid posts
         if (!post?.id || !post?.user_id || !post?.channel_id) {
             console.warn('⚠️ [PostReceipt] Invalid post:', {
@@ -28,8 +33,8 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
         }
 
         const messageId = post.id;
-        const [seenBy, setSeenBy] = useState<string[]>([]);
-        const [hasLoadedState, setHasLoadedState] = useState(false);
+        const [seenBy, setSeenBy] = React.useState<string[]>([]);
+        const [hasLoadedState, setHasLoadedState] = React.useState(false);
         
         // Get current user ID
         const currentUserId = document.cookie.match(/MMUSERID=([^;]+)/)?.[1] || 
@@ -46,19 +51,20 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
 
         // Get readers from Redux store using proper selector with null check
         const readerIds = useSelector((state: RootState) => {
-            if (!state?.channelReaders) {
-                console.warn('⚠️ [PostReceipt] Redux state not initialized:', {
-                    messageId,
-                    hasState: !!state,
-                    hasChannelReaders: state && 'channelReaders' in state
-                });
+            console.log('DEBUG: State received in useSelector for post:', post.id, JSON.stringify(state));
+            if (!state) {
+                console.warn('⚠️ [PostReceipt] Redux state is null/undefined in useSelector for post:', post.id);
+                return [];
+            }
+            if (!state.channelReaders) {
+                console.warn('⚠️ [PostReceipt] Redux state.channelReaders not initialized for post:', post.id, 'State keys:', Object.keys(state));
                 return [];
             }
             return selectReaders(state, post.channel_id, messageId);
         });
 
         // Update local state when Redux state changes
-        useEffect(() => {
+        React.useEffect(() => {
             console.log('📥 [PostReceipt] Readers updated from Redux:', {
                 messageId,
                 readerIds,
