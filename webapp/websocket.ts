@@ -1,133 +1,174 @@
 // webapp/websocket.ts
 
 import { Dispatch } from 'redux';
-import { updateReadReceipts, getUserDisplayName, loadInitialReceipts } from './store';
+import { updateReadReceipts, getUserDisplayName } from './store';
 import { setReaders, addReader } from './store/channelReaders';
-
-interface WebSocketMessageData {
-    message_id: string;
-    user_id: string;
-    timestamp?: number;
-    channel_id?: string;
-}
-
-interface WebSocketEvent {
-    event: string;
-    data?: WebSocketMessageData;
-    broadcast?: {
-        channel_id?: string;
-    };
-}
 
 const READ_RECEIPT_EVENT = 'custom_mattermost-readreceipts_read_receipt';
 const CHANNEL_READERS_EVENT = 'custom_mattermost-readreceipts_channel_readers';
 
-export function handleWebSocketEvent(dispatch: Dispatch) {
-    return (payload: any) => {
-        let eventName: string;
-        let eventData: WebSocketMessageData | undefined;
-        let broadcast: { channel_id?: string } | undefined;
+// Maximum number of reconnection attempts
+const MAX_RECONNECT_ATTEMPTS = 5;
+// Initial reconnect delay in milliseconds
+const INITIAL_RECONNECT_DELAY = 1000;
 
-        // Registry event payload
-        if (typeof payload === 'object' && 'event' in payload && 'data' in payload) {
-            eventName = payload.event;
-            eventData = payload.data as WebSocketMessageData;
-            broadcast = payload.broadcast;
-        } else if (payload.data && typeof payload.data === 'string') {
-            // Raw MessageEvent
-            try {
-                const parsed = JSON.parse(payload.data);
-                eventName = parsed.event;
-                eventData = parsed.data;
-                broadcast = parsed.broadcast;
-            } catch {
-                console.error('❌ [WebSocket] Failed to parse payload.data:', payload.data);
+function getWebSocketUrl(): string {
+    // Try to get MMUSERID first, then fall back to MMTOKEN
+    const userIdMatch = document.cookie.match(/MMUSERID=([^;]+)/);
+    const tokenMatch = document.cookie.match(/MMTOKEN=([^;]+)/);
+    const token = userIdMatch?.[1] || tokenMatch?.[1] || '';
+    
+    // Use current origin to construct WebSocket URL
+    const baseUrl = window.location.origin.replace(/^http/, 'ws');
+    const pluginId = (window as any).plugins?.['mattermost-readreceipts']?.id || 'mattermost-readreceipts';
+    
+    return `${baseUrl}/plugins/${pluginId}/api/v1/websocket?token=${token}`;
+}
+
+// Track WebSocket connection globally
+let globalWebSocket: WebSocket | null = null;
+
+// Explicitly export the WebSocket event handler factory
+export function handleWebSocketEvent(dispatch: Dispatch) {
+    return function(event: MessageEvent) {
+        try {
+            const { data } = event;
+            const eventData = JSON.parse(data);
+            const eventName = eventData?.event || '';
+
+            if (!eventData) {
+                console.warn('⚠️ [WebSocket] Empty event received');
                 return;
             }
-        } else {
-            console.warn('⚠️ [WebSocket] Unsupported event payload:', payload);
-            return;
-        }
 
-        // Handle channel readers batch update (allow prefix variations)
-        if (eventName.includes('channel_readers')) {
-            const data = eventData as unknown as { channel_id: string; last_post_id: string; user_ids: string[] };
-            if (data.channel_id && data.last_post_id && Array.isArray(data.user_ids)) {
-                dispatch(setReaders({
-                    channelId: data.channel_id,
-                    payload: { [data.last_post_id]: data.user_ids }
-                }));
-                console.log('✨ [WebSocket] Channel readers update received:', data);
-            } else {
-                console.error('❌ [WebSocket] Invalid channel readers data:', eventData);
+            // Handle channel readers updates
+            if (eventName.includes('channel_readers')) {
+                const data = eventData as unknown as { ChannelID: string; LastPostID: string; UserIDs: string[] };
+                if (data.ChannelID && data.LastPostID && Array.isArray(data.UserIDs)) {
+                    dispatch(setReaders({
+                        channelId: data.ChannelID,
+                        payload: { [data.LastPostID]: data.UserIDs }
+                    }));
+                    console.log('✨ [WebSocket] Channel readers update received:', data);
+                } else {
+                    console.error('❌ [WebSocket] Invalid channel readers data:', eventData);
+                }
+                return;
             }
-            return;
-        }
 
-        // Only handle read receipt events (allow suffix variations)
-        if (!eventName.endsWith('read_receipt')) {
-            return;
-        }
+            // Handle read receipt events
+            if (eventName.endsWith('read_receipt')) {
+                if (!eventData?.MessageID || !eventData?.UserID) {
+                    console.error('❌ [WebSocket] Invalid read receipt data:', eventData);
+                    return;
+                }
 
-        if (!eventData?.message_id || !eventData?.user_id) {
-            console.error('❌ [WebSocket] Invalid read receipt data:', eventData);
-            return;
-        }
+                const { MessageID: message_id, UserID: user_id, ChannelID: channel_id } = eventData;
+                console.log('✨ [WebSocket] Processing read receipt:', {
+                    message_id,
+                    user_id,
+                    channel_id,
+                    username: getUserDisplayName(user_id)
+                });
 
-        const message_id = eventData.message_id;
-        const user_id = eventData.user_id;
-        const channel_id = eventData.channel_id || broadcast?.channel_id;
-
-        if (!channel_id) {
-            console.warn('⚠️ [WebSocket] Missing channel_id in event payload for message:', message_id);
-        }
-
-        console.log('✨ [WebSocket] Processing read receipt:', {
-            message_id,
-            user_id,
-            channel_id,
-            username: getUserDisplayName(user_id)
-        });
-
-        // Update store and trigger UI update
-        updateReadReceipts(message_id, user_id);
-
-        // Optionally reload receipts list for channel
-        if (channel_id) {
-            loadInitialReceipts(channel_id).catch(error => {
-                console.error('❌ [WebSocket] Failed to reload receipts after event:', error);
-            });
+                updateReadReceipts(message_id, user_id);
+                dispatch(addReader({ 
+                    channelId: channel_id || '',
+                    postId: message_id,
+                    userId: user_id
+                }));
+            }
+        } catch (error) {
+            console.error('❌ [WebSocket] Error processing message:', error);
         }
     };
 }
 
-export function initializeWebSocket() {
-    console.log('🔌 [WebSocket] Initializing connection...');
-    
-    try {
-        const socket = new WebSocket('/api/v4/websocket');
+export function setupWebsocket(dispatch: Dispatch): Promise<void> {
+    return new Promise((resolve, reject) => {
+        let reconnectAttempts = 0;
+        let reconnectTimeout: number | null = null;
 
-        socket.onopen = () => {
-            console.log('✅ [WebSocket] Connection established');
-        };
+        function cleanup() {
+            if (globalWebSocket) {
+                try {
+                    globalWebSocket.close();
+                } catch (error) {
+                    console.warn('⚠️ [WebSocket] Error closing connection:', error);
+                }
+                globalWebSocket = null;
+            }
+            if (reconnectTimeout) {
+                window.clearTimeout(reconnectTimeout);
+                reconnectTimeout = null;
+            }
+        }
 
-        socket.onerror = (error) => {
-            console.error('❌ [WebSocket] Connection error:', {
-                error,
-                readyState: socket.readyState
-            });
-        };
+        function connect() {
+            cleanup();
 
-        socket.onclose = () => {
-            console.warn('⚠️ [WebSocket] Connection closed', {
-                wasClean: socket.readyState === 3,
-                readyState: socket.readyState
-            });
-        };
+            try {
+                const url = getWebSocketUrl();
+                console.log('🔌 [WebSocket] Connecting to:', url);
+                
+                globalWebSocket = new WebSocket(url);
+                const ws = globalWebSocket;
 
-        return socket;
-    } catch (error) {
-        console.error('❌ [WebSocket] Failed to initialize:', error);
-        return null;
-    }
+                ws.addEventListener('open', () => {
+                    console.log('✅ [WebSocket] Connection established');
+                    reconnectAttempts = 0;
+                    resolve();
+                });
+
+                ws.addEventListener('message', (event) => {
+                    try {
+                        const handler = handleWebSocketEvent(dispatch);
+                        handler(event);
+                    } catch (error) {
+                        console.error('❌ [WebSocket] Error handling message:', error);
+                    }
+                });
+
+                ws.addEventListener('error', (error) => {
+                    console.error('❌ [WebSocket] Connection error:', error);
+                    if (reconnectAttempts === 0) {
+                        reject(error);
+                    }
+                });
+
+                ws.addEventListener('close', (event) => {
+                    console.warn('⚠️ [WebSocket] Connection closed:', {
+                        code: event.code,
+                        reason: event.reason || 'No reason provided',
+                        wasClean: event.wasClean
+                    });
+
+                    // Attempt to reconnect if it wasn't a clean close
+                    if (!event.wasClean && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                        const delay = Math.min(INITIAL_RECONNECT_DELAY * Math.pow(2, reconnectAttempts), 30000);
+                        console.log(`🔄 [WebSocket] Reconnecting in ${delay}ms (attempt ${reconnectAttempts + 1}/${MAX_RECONNECT_ATTEMPTS})`);
+                        
+                        if (reconnectTimeout) {
+                            window.clearTimeout(reconnectTimeout);
+                        }
+                        
+                        reconnectTimeout = window.setTimeout(() => {
+                            reconnectAttempts++;
+                            connect();
+                        }, delay);
+                    }
+                });
+
+            } catch (error) {
+                console.error('❌ [WebSocket] Setup error:', error);
+                reject(error);
+            }
+        }
+
+        // Start initial connection
+        connect();
+
+        // Cleanup on window unload
+        window.addEventListener('unload', cleanup);
+    });
 }

@@ -22,6 +22,10 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({
     const visibilityStartTime = useRef<number | null>(null);
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+    // Store visibility state to avoid unnecessary resets
+    const isTabVisible = useRef<boolean>(document.visibilityState === 'visible');
+    const isElementVisible = useRef<boolean>(false);
+
     const getUserId = (): string => {
         let userId = window.localStorage.getItem('MMUSERID');
         
@@ -47,18 +51,11 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({
     };
 
     const sendReadReceipt = async () => {
-        if (hasSent) {
-            console.log(`ℹ️ [VisibilityTracker] Already sent receipt for: ${messageId}`);
-            return;
-        }
-
-        // Don't send read receipts for own messages
-        if (!shouldTrackVisibility()) {
-            console.log(`ℹ️ [VisibilityTracker] Skipping read receipt for author's own message:`, {
-                messageId,
-                postAuthorId,
-                currentUserId: getUserId()
-            });
+        if (hasSent || !shouldTrackVisibility()) {
+            if (timerRef.current) {
+                clearInterval(timerRef.current);
+                timerRef.current = null;
+            }
             return;
         }
 
@@ -100,6 +97,10 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({
             if (response.ok) {
                 console.log(`✅ [VisibilityTracker] Read receipt sent successfully for ${messageId}`);
                 setHasSent(true);
+                if (timerRef.current) {
+                    clearInterval(timerRef.current);
+                    timerRef.current = null;
+                }
                 updateReadReceipts(messageId, currentUserId);
                 onVisible?.(messageId);
             } else {
@@ -113,30 +114,38 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({
         }
     };
 
-    const resetVisibilityTimer = () => {
-        if (timerRef.current) {
-            clearInterval(timerRef.current);
-            timerRef.current = null;
-        }
-        if (visibilityStartTime.current) {
+    const resetVisibilityTimer = debounce(() => {
+        if (!isTabVisible.current) {
+            console.log(`⏱️ [VisibilityTracker] Reset visibility timer for ${messageId} (tab hidden)`);
+            if (timerRef.current) {
+                clearInterval(timerRef.current);
+                timerRef.current = null;
+            }
             visibilityStartTime.current = null;
+        } else {
+            console.log(`⏱️ [VisibilityTracker] Keeping timer for ${messageId} (tab visible)`);
         }
-        console.log(`⏱️ [VisibilityTracker] Reset visibility timer for ${messageId}`);
-    };
+    }, 500);
 
     const handleTabVisibilityChange = () => {
-        if (document.visibilityState !== 'visible') {
-            console.log(`👁️ [VisibilityTracker] Tab hidden, resetting timer for ${messageId}`);
+        isTabVisible.current = document.visibilityState === 'visible';
+        
+        if (!isTabVisible.current) {
+            console.log(`👁️ [VisibilityTracker] Tab hidden, pausing timer for ${messageId}`);
             resetVisibilityTimer();
-        } else {
-            console.log(`👁️ [VisibilityTracker] Tab visible, will restart timer if message is visible`);
+        } else if (isElementVisible.current && !hasSent) {
+            console.log(`👁️ [VisibilityTracker] Tab visible again, resuming timer for ${messageId}`);
+            visibilityStartTime.current = Date.now();
+            timerRef.current = setInterval(checkVisibilityDuration, 1000);
         }
     };
 
     const checkVisibilityDuration = () => {
-        // Don't track visibility for own messages
-        if (!shouldTrackVisibility()) {
-            resetVisibilityTimer();
+        if (hasSent || !shouldTrackVisibility()) {
+            if (timerRef.current) {
+                clearInterval(timerRef.current);
+                timerRef.current = null;
+            }
             return;
         }
 
@@ -162,24 +171,22 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({
 
     const handleVisibilityChange = debounce((entries: IntersectionObserverEntry[]) => {
         const entry = entries[0];
-        const isTabActive = document.visibilityState === 'visible';
-        const isNowVisible = entry.isIntersecting;
+        isElementVisible.current = entry.isIntersecting;
         
         console.log(`👁️ [VisibilityTracker] Visibility changed for ${messageId}:`, {
-            isVisible: isNowVisible,
+            isVisible: isElementVisible.current,
             visibility: Math.round(entry.intersectionRatio * 100) + '%',
-            isTabActive
+            isTabActive: isTabVisible.current
         });
 
-        // Start tracking time when message becomes visible
-        if (isNowVisible && isTabActive) {
+        // Start tracking time when message becomes visible and tab is active
+        if (isElementVisible.current && isTabVisible.current && !hasSent) {
             if (!visibilityStartTime.current) {
                 console.log(`⏱️ [VisibilityTracker] Starting visibility timer for ${messageId}`);
                 visibilityStartTime.current = Date.now();
                 timerRef.current = setInterval(checkVisibilityDuration, 1000);
             }
         } else {
-            console.log(`⏱️ [VisibilityTracker] Resetting visibility timer for ${messageId} (visible: ${isNowVisible}, tab active: ${isTabActive})`);
             resetVisibilityTimer();
         }
     }, 100);

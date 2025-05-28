@@ -3,9 +3,8 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
-
-	"github.com/arg/mattermost-readreceipts/server/types"
 )
 
 type MySQLStore struct {
@@ -30,10 +29,10 @@ func (s *MySQLStore) Initialize() error {
 	)
 	`
 	if _, err := s.db.Exec(createTable); err != nil {
-		return err
+		return fmt.Errorf("failed to create read_events table: %w", err)
 	}
 
-	// Create indices if they don't exist (MySQL-safe way)
+	// Create indices if they don't exist
 	indices := []string{
 		"CREATE INDEX idx_read_events_message_id ON read_events(message_id)",
 		"CREATE INDEX idx_read_events_user_id ON read_events(user_id)",
@@ -41,49 +40,79 @@ func (s *MySQLStore) Initialize() error {
 	}
 
 	for _, idx := range indices {
-		// Ignore errors as they likely mean the index already exists
-		s.db.Exec(idx)
+		if _, err := s.db.Exec(idx); err != nil {
+			if !strings.Contains(err.Error(), "Duplicate key name") {
+				return fmt.Errorf("failed to create index: %w", err)
+			}
+		}
 	}
 
 	return nil
 }
 
+// BeginTx starts a transaction
+func (s *MySQLStore) BeginTx() (Tx, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	return tx, nil
+}
+
+// UpsertTx performs an upsert within a transaction
+func (s *MySQLStore) UpsertTx(tx Tx, event ReadEvent) error {
+	sqlTx, ok := tx.(*sql.Tx)
+	if !ok {
+		return fmt.Errorf("invalid transaction type: %T", tx)
+	}
+
+	query := `
+		INSERT INTO read_events (message_id, user_id, channel_id, timestamp)
+		VALUES (?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE timestamp = VALUES(timestamp)
+	`
+	result, err := sqlTx.Exec(query, event.MessageID, event.UserID, event.ChannelID, event.Timestamp)
+	if err != nil {
+		return fmt.Errorf("failed to upsert read event: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get affected rows: %w", err)
+	}
+
+	if rows == 0 {
+		return fmt.Errorf("upsert affected 0 rows: %+v", event)
+	}
+
+	return nil
+}
+
+// Upsert performs an upsert outside a transaction
 func (s *MySQLStore) Upsert(event ReadEvent) error {
 	query := `
 		INSERT INTO read_events (message_id, user_id, channel_id, timestamp)
 		VALUES (?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE timestamp = VALUES(timestamp)
 	`
-	_, err := s.db.Exec(query, event.MessageID, event.UserID, event.ChannelID, event.Timestamp)
-	return err
-}
-
-func (s *MySQLStore) GetByChannel(channelID, excludeUserID string) ([]ReadEvent, error) {
-	query := `
-		SELECT message_id, user_id, channel_id, timestamp
-		FROM read_events
-		WHERE channel_id = ?
-		AND user_id != ?
-		ORDER BY timestamp DESC
-	`
-
-	rows, err := s.db.Query(query, channelID, excludeUserID)
+	result, err := s.db.Exec(query, event.MessageID, event.UserID, event.ChannelID, event.Timestamp)
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("failed to upsert read event: %w", err)
 	}
-	defer rows.Close()
 
-	var events []ReadEvent
-	for rows.Next() {
-		var event ReadEvent
-		if err := rows.Scan(&event.MessageID, &event.UserID, &event.ChannelID, &event.Timestamp); err != nil {
-			return nil, err
-		}
-		events = append(events, event)
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get affected rows: %w", err)
 	}
-	return events, rows.Err()
+
+	if rows == 0 {
+		return fmt.Errorf("upsert affected 0 rows: %+v", event)
+	}
+
+	return nil
 }
 
+// CleanupOlderThan deletes old read receipts
 func (s *MySQLStore) CleanupOlderThan(days int) error {
 	cutoffMs := time.Now().AddDate(0, 0, -days).UnixMilli()
 
@@ -97,26 +126,6 @@ func (s *MySQLStore) CleanupOlderThan(days int) error {
 	}
 
 	return nil
-}
-
-func (s *MySQLStore) BeginTx() (Tx, error) {
-	return s.db.Begin()
-}
-
-func (s *MySQLStore) UpsertTx(tx Tx, event ReadEvent) error {
-	sqlTx, ok := tx.(*sql.Tx)
-	if !ok {
-		return fmt.Errorf("invalid transaction type")
-	}
-
-	query := `
-		INSERT INTO read_events (message_id, user_id, channel_id, timestamp)
-		VALUES (?, ?, ?, ?)
-		ON DUPLICATE KEY UPDATE
-		timestamp = GREATEST(timestamp, VALUES(timestamp))
-	`
-	_, err := sqlTx.Exec(query, event.MessageID, event.UserID, event.ChannelID, event.Timestamp)
-	return err
 }
 
 // GetChannelReads moved to channel_reads.go
@@ -146,26 +155,34 @@ func (s *MySQLStore) GetReadersSince(channelID string, sinceMs int64, excludeUse
 	return userIDs, rows.Err()
 }
 
-// UpsertChannelReadTx updates or inserts a channel read record within a transaction
-func (s *MySQLStore) UpsertChannelReadTx(tx Tx, read types.ChannelRead) error {
-	sqlTx, ok := tx.(*sql.Tx)
-	if !ok {
-		return fmt.Errorf("invalid transaction type")
-	}
-
+// GetByChannel retrieves read receipt events for a channel, excluding a specific user.
+func (s *MySQLStore) GetByChannel(channelID, excludeUserID string) ([]ReadEvent, error) {
 	query := `
-		INSERT INTO channel_reads (channel_id, user_id, last_post_id, last_seen_at)
-		VALUES (?, ?, ?, ?)
-		ON DUPLICATE KEY UPDATE
-		last_post_id = CASE
-			WHEN last_seen_at < VALUES(last_seen_at) THEN VALUES(last_post_id)
-			ELSE last_post_id
-		END,
-		last_seen_at = GREATEST(last_seen_at, VALUES(last_seen_at))
+		SELECT message_id, user_id, timestamp
+		FROM read_events
+		WHERE message_id LIKE ?
+		AND user_id != ?
+		ORDER BY timestamp DESC
 	`
-	_, err := sqlTx.Exec(query, read.ChannelID, read.UserID, read.LastPostID, read.LastSeenAt)
+	// Use channel ID prefix to match messages in the channel
+	channelPrefix := channelID + ":%"
+
+	rows, err := s.db.Query(query, channelPrefix, excludeUserID)
 	if err != nil {
-		return fmt.Errorf("failed to upsert channel read: %w", err)
+		return nil, fmt.Errorf("failed to query read events: %w", err)
 	}
-	return nil
+	defer rows.Close()
+
+	var events []ReadEvent
+	for rows.Next() {
+		var event ReadEvent
+		if err := rows.Scan(&event.MessageID, &event.UserID, &event.Timestamp); err != nil {
+			return nil, fmt.Errorf("failed to scan read event: %w", err)
+		}
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating read events: %w", err)
+	}
+	return events, nil
 }

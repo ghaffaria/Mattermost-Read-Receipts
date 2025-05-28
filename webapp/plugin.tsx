@@ -3,23 +3,12 @@ import React from 'react';
 // @ts-ignore
 import {PluginRegistry} from 'mattermost-webapp/plugins/registry';
 import PostReceipt from './components/PostReceipt';
-import {handleWebSocketEvent, initializeWebSocket} from './websocket';
-import {setMattermostStore, loadInitialReceipts, fetchPluginConfig, loadChannelReads} from './store';
+import {handleWebSocketEvent, setupWebsocket} from './websocket';
+import {loadInitialReceipts, fetchPluginConfig, loadChannelReads} from './store';
+import { store, setMattermostStore } from './store/pluginStore';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import ReadReceiptRootObserver from './components/ReadReceiptRootObserver';
-
-interface WebSocketMessage {
-    event: string;
-    data: {
-        channel_ids?: string[];
-    };
-}
-
-declare global {
-    interface Window {
-        store: any;
-    }
-}
-
+import { Provider } from 'react-redux';
 import { Post } from './types/mattermost-webapp';
 
 interface PostProps {
@@ -27,69 +16,48 @@ interface PostProps {
 }
 
 export default class ReadReceiptPlugin {
-    async initialize(registry: PluginRegistry, store: any) {
+    async initialize(registry: PluginRegistry, mattermostStore: any) {
         console.log('🔌 [ReadReceiptPlugin] Initializing...');
         
         try {
-            // Set the Mattermost store reference for our plugin
-            setMattermostStore(store);
+            if (!mattermostStore?.getState) {
+                console.error('❌ [ReadReceiptPlugin] Invalid Mattermost store:', mattermostStore);
+                throw new Error('Invalid Mattermost store provided');
+            }
+
+            // Initialize Redux store first
+            await setMattermostStore(mattermostStore);
             
-            // Fetch plugin configuration
-            await fetchPluginConfig();
+            // Pre-load initial data to populate Redux store
+            const state = mattermostStore.getState();
+            const currentChannelId = state?.entities?.channels?.currentChannelId;
+            
+            // Initialize WebSocket and fetch plugin configuration in parallel
+            const [config] = await Promise.all([
+                fetchPluginConfig(),
+                setupWebsocket(store.dispatch) // Use our store's dispatch
+            ]);
 
-            // Initialize WebSocket
-            console.log('🔌 [ReadReceiptPlugin] Initializing WebSocket...');
-            const socket = initializeWebSocket();
-            if (!socket) {
-                throw new Error('Failed to initialize WebSocket');
-            }
-            socket.onmessage = handleWebSocketEvent(store.dispatch);
-
-            // Listen for channel view events
-            registry.registerWebSocketEventHandler(
-                'multiple_channels_viewed',
-                async (message: WebSocketMessage) => {
-                    const channelIds = message.data?.channel_ids;
-                    if (channelIds && Array.isArray(channelIds)) {
-                        console.log('👀 [ReadReceiptPlugin] Channels viewed:', channelIds);
-                        for (const channelId of channelIds) {
-                            try {
-                                // Load both receipts and channel reads
-                                await Promise.all([
-                                    loadInitialReceipts(channelId),
-                                    loadChannelReads(channelId)
-                                ]);
-                            } catch (error) {
-                                console.error('❌ [ReadReceiptPlugin] Failed to load receipts:', {
-                                    channelId,
-                                    error
-                                });
-                            }
-                        }
-                    }
-                }
-            );
-
-            // Pre-load receipts for current channel before mounting
-            try {
-                const state = store.getState();
-                const currentChannelId = state?.entities?.channels?.currentChannelId;
-                
-                if (currentChannelId) {
-                    console.log('📥 [ReadReceiptPlugin] Pre-loading receipts for channel:', currentChannelId);
-                    await loadInitialReceipts(currentChannelId);
-                    console.log('✅ [ReadReceiptPlugin] Pre-loaded receipts successfully');
-                } else {
-                    console.log('ℹ️ [ReadReceiptPlugin] No active channel, skipping pre-load');
-                }
-            } catch (error) {
-                console.error('❌ [ReadReceiptPlugin] Failed to pre-load receipts:', error);
+            // Pre-load receipts for current channel if available
+            if (currentChannelId) {
+                console.log('📥 [ReadReceiptPlugin] Pre-loading receipts for channel:', currentChannelId);
+                await Promise.all([
+                    loadInitialReceipts(currentChannelId, store.dispatch),
+                    loadChannelReads(currentChannelId)
+                ]);
+                console.log('✅ [ReadReceiptPlugin] Pre-loaded receipts successfully');
             }
 
-            // Register root component after pre-loading (or if pre-load fails)
-            registry.registerRootComponent(ReadReceiptRootObserver);
+            // Register wrapped root component
+            registry.registerRootComponent(() => (
+                <ErrorBoundary>
+                    <Provider store={store}>
+                        <ReadReceiptRootObserver />
+                    </Provider>
+                </ErrorBoundary>
+            ));
 
-            // Register post component with proper error handling
+            // Register post component with error boundary
             try {
                 if ((registry as any).registerPostTypeComponent) {
                     console.log('🧩 [ReadReceiptPlugin] Registering post component...');
@@ -99,7 +67,13 @@ export default class ReadReceiptPlugin {
                                 return null;
                             }
                             console.log('[ReadReceiptPlugin] Rendering for post:', props.post.id);
-                            return <PostReceipt post={props.post} />;
+                            return (
+                                <ErrorBoundary>
+                                    <Provider store={store}>
+                                        <PostReceipt post={props.post} />
+                                    </Provider>
+                                </ErrorBoundary>
+                            );
                         }
                     );
                     console.log('✅ [ReadReceiptPlugin] Post component registered');
@@ -108,7 +82,7 @@ export default class ReadReceiptPlugin {
                 console.error('❌ [ReadReceiptPlugin] Error in registerPostTypeComponent:', error);
             }
 
-            // Register WebSocket handler with error handling
+            // Register WebSocket handler
             try {
                 console.log('🔌 [ReadReceiptPlugin] Registering WebSocket handler...');
                 registry.registerWebSocketEventHandler(
@@ -123,7 +97,7 @@ export default class ReadReceiptPlugin {
             console.log('✅ [ReadReceiptPlugin] Initialization complete');
         } catch (error) {
             console.error('❌ [ReadReceiptPlugin] Critical initialization error:', error);
-            throw error; // Re-throw to notify Mattermost of initialization failure
+            throw error;
         }
     }
 }

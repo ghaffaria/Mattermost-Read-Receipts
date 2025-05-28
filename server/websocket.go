@@ -15,10 +15,10 @@ func (p *Plugin) PublishReadReceipt(channelID, messageID, userID string, timesta
 	p.API.PublishWebSocketEvent(
 		WebSocketEventReadReceipt,
 		map[string]interface{}{
-			"message_id": messageID,
-			"user_id":    userID,
-			"channel_id": channelID,
-			"timestamp":  timestamp,
+			"MessageID": messageID,
+			"UserID":    userID,
+			"ChannelID": channelID,
+			"Timestamp": timestamp,
 		},
 		&model.WebsocketBroadcast{
 			ChannelId: channelID,
@@ -31,9 +31,9 @@ func (p *Plugin) PublishChannelReadersUpdate(channelID, lastPostID string, userI
 	p.API.PublishWebSocketEvent(
 		WebSocketEventChannelReaders,
 		map[string]interface{}{
-			"channel_id":   channelID,
-			"last_post_id": lastPostID,
-			"user_ids":     userIDs,
+			"ChannelID":  channelID,
+			"LastPostID": lastPostID,
+			"UserIDs":    userIDs,
 		},
 		&model.WebsocketBroadcast{
 			ChannelId: channelID,

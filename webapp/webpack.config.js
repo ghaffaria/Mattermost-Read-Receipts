@@ -12,13 +12,22 @@ module.exports = {
   },
   resolve: {
     extensions: ['.ts', '.tsx', '.js', '.jsx'],
+    modules: ['node_modules'],
   },
   module: {
     rules: [
       {
         test: /\.tsx?$/,
         exclude: /node_modules/,
-        use: 'ts-loader',           // compiles TS → JS
+        use: {
+          loader: 'ts-loader',
+          options: {
+            transpileOnly: true, // Speed up compilation
+            compilerOptions: {
+              module: 'CommonJS'
+            }
+          }
+        }
       },
     ],
   },
@@ -27,9 +36,14 @@ module.exports = {
     'react-dom': 'ReactDOM',
     redux: 'Redux',
     'react-redux': 'ReactRedux',
+    'prop-types': 'PropTypes',
     'mattermost-redux': 'window.reduxStore',
     '@mattermost/client': 'window.reduxStore'
   },
-
-  devtool: 'source-map',
+  optimization: {
+    minimize: true
+  },
+  performance: {
+    hints: false
+  }
 };

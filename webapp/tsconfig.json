@@ -1,17 +1,30 @@
 {
   "compilerOptions": {
     "types": ["react", "react-dom", "./types/mattermost-webapp", "jest"],
-    "target": "ES6",
-    "module": "NodeNext",
-    "lib": ["DOM", "ESNext"],
+    "target": "es5",
+    "module": "CommonJS",
+    "lib": ["dom", "es2015", "es2016", "es2017"],
     "jsx": "react",
     "strict": true,
+    "noImplicitAny": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
     "paths": { "*": ["*", "types/*"] },
-    "moduleResolution": "nodenext"
+    "moduleResolution": "node",
+    "allowJs": true,
+    "outDir": "dist",
+    "sourceMap": true,
+    "declaration": false
   },
-  "include": ["**/*"]
+  "include": [
+    "**/*.ts",
+    "**/*.tsx"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "webpack.config.js"
+  ]
 }

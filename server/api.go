@@ -10,8 +10,18 @@ import (
 	"github.com/arg/mattermost-readreceipts/server/store"
 	"github.com/arg/mattermost-readreceipts/server/types"
 	"github.com/gorilla/mux"
+	"github.com/gorilla/websocket"
 	"github.com/mattermost/mattermost-server/v6/plugin"
 )
+
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+	CheckOrigin: func(r *http.Request) bool {
+		// In production, you might want to check the origin
+		return true
+	},
+}
 
 // Using model.ReadRequest and model.ReadEvent defined in model.go
 
@@ -26,6 +36,7 @@ func (p *Plugin) ServeHTTP(c *plugin.Context, w http.ResponseWriter, r *http.Req
 	router.Handle("/api/v1/debug/ping", http.HandlerFunc(p.HandlePing)).Methods("GET")
 	router.Handle("/api/v1/debug/db", p.MattermostAuthorizationRequired(http.HandlerFunc(p.HandleDBCheck))).Methods("GET")
 	router.Handle("/api/v1/read/channel/{channelID}", p.MattermostAuthorizationRequired(http.HandlerFunc(p.HandleGetReadersSince))).Methods("GET")
+	router.Handle("/api/v1/websocket", p.MattermostAuthorizationRequired(http.HandlerFunc(p.HandleWebSocket))).Methods("GET")
 
 	p.logDebug("[API] Received request",
 		"path", r.URL.Path,
@@ -37,6 +48,44 @@ func (p *Plugin) ServeHTTP(c *plugin.Context, w http.ResponseWriter, r *http.Req
 	)
 
 	router.ServeHTTP(w, r)
+}
+
+// HandleWebSocket handles WebSocket connections
+func (p *Plugin) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("Mattermost-User-Id")
+	if userID == "" {
+		userID = r.Header.Get("Mattermost-User-ID")
+	}
+
+	// Upgrade the HTTP connection to a WebSocket connection
+	c, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		p.logError("[WebSocket] Failed to upgrade connection", "error", err.Error())
+		return
+	}
+	defer c.Close()
+
+	p.logDebug("[WebSocket] Client connected", "user_id", userID)
+
+	// Keep the connection alive
+	for {
+		messageType, _, err := c.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				p.logError("[WebSocket] Read error", "error", err.Error())
+			} else {
+				p.logDebug("[WebSocket] Connection closed by client", "user_id", userID)
+			}
+			break
+		}
+
+		if messageType == websocket.PingMessage {
+			if err := c.WriteMessage(websocket.PongMessage, nil); err != nil {
+				p.logError("[WebSocket] Failed to send pong", "error", err.Error())
+				break
+			}
+		}
+	}
 }
 
 func (p *Plugin) MattermostAuthorizationRequired(next http.Handler) http.Handler {
@@ -98,14 +147,21 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 		"csrf_token", r.Header.Get("X-CSRF-Token") != "",
 	)
 
+	decoder := json.NewDecoder(r.Body)
 	var req ReadRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		p.logError("[API] Failed to decode request body", "error", err.Error())
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err := decoder.Decode(&req); err != nil {
+		p.logError("[API] Failed to decode request body", "error", err.Error(), "body", r.Body)
+		http.Error(w, "Invalid request format", http.StatusBadRequest)
 		return
 	}
 
-	// Validate request
+	// Debug log the received request
+	p.logDebug("[API] Received read receipt request",
+		"message_id", req.MessageID,
+		"channel_id", req.ChannelID,
+		"user_id", userID)
+
+	// Validate message_id
 	if req.MessageID == "" {
 		p.logError("[API] Missing message_id in request")
 		http.Error(w, "message_id is required", http.StatusBadRequest)
@@ -115,7 +171,10 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 	// Get post to verify channel_id if not provided
 	post, err := p.API.GetPost(req.MessageID)
 	if err != nil {
-		p.logError("[API] Failed to get post", "message_id", req.MessageID, "error", err.Error())
+		p.logError("[API] Failed to get post",
+			"message_id", req.MessageID,
+			"error", err.Error(),
+			"user_id", userID)
 		http.Error(w, "Invalid message_id", http.StatusBadRequest)
 		return
 	}
@@ -123,10 +182,13 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 	channelID := req.ChannelID
 	if channelID == "" {
 		channelID = post.ChannelId
+		p.logDebug("[API] Using channel_id from post",
+			"channel_id", channelID,
+			"message_id", req.MessageID)
 	}
 
 	// Store the read receipt
-	now := time.Now().Unix()
+	now := time.Now().UnixMilli() // Use milliseconds instead of seconds
 	event := store.ReadEvent{
 		MessageID: req.MessageID,
 		UserID:    userID,
@@ -151,7 +213,7 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 			"channel_id", channelID,
 			"error", err.Error(),
 		)
-		http.Error(w, "Internal error", http.StatusInternalServerError)
+		http.Error(w, "Failed to store read receipt", http.StatusInternalServerError)
 		return
 	}
 
@@ -168,7 +230,7 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 			"user_id", userID,
 			"error", err.Error(),
 		)
-		http.Error(w, "Internal error", http.StatusInternalServerError)
+		http.Error(w, "Failed to update channel read status", http.StatusInternalServerError)
 		return
 	}
 
@@ -177,25 +239,20 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 		p.logError("[API] Failed to commit transaction",
 			"error", err.Error(),
 		)
-		http.Error(w, "Internal error", http.StatusInternalServerError)
+		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
 		return
-	}
-
-	// Update channel read status
-	if err := p.store.UpsertChannelRead(channelID, userID, req.MessageID, now*1000); err != nil {
-		p.logError("[API] Failed to update channel read status",
-			"channel_id", channelID,
-			"user_id", userID,
-			"error", err.Error(),
-		)
-		// Don't fail the request, just log the error
 	}
 
 	// Broadcast receipt via WebSocket
 	p.PublishReadReceipt(channelID, req.MessageID, userID, now)
 
-	// Return success
-	w.WriteHeader(http.StatusNoContent)
+	// Write success response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "ok",
+		"event":  event,
+	})
 }
 
 func (p *Plugin) HandleGetReceipts(w http.ResponseWriter, r *http.Request) {
@@ -215,35 +272,44 @@ func (p *Plugin) HandleGetReceipts(w http.ResponseWriter, r *http.Request) {
 		"channel_id", channelID,
 		"user_id", userID)
 
-	sinceMs, err := p.getSinceMillis(r)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+	var sinceMs int64 = 0
+	if r.URL.Query().Get("since") != "" || r.URL.Query().Get("postID") != "" {
+		var err error
+		sinceMs, err = p.getSinceMillis(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 	}
 
-	// Get list of users who have read messages in this channel since the given time
-	readers, err := p.store.GetReadersSince(channelID, sinceMs, userID)
+	// Get read events for the channel since the given time
+	events, err := p.store.GetByChannel(channelID, "")
 	if err != nil {
-		p.logError("[API] Failed to fetch channel readers",
+		p.logError("[API] Failed to fetch channel receipts",
 			"channel_id", channelID,
 			"since", sinceMs,
 			"error", err.Error())
-		http.Error(w, "Failed to fetch channel readers", http.StatusInternalServerError)
+		http.Error(w, "Failed to fetch channel receipts", http.StatusInternalServerError)
 		return
 	}
 
-	p.logDebug("[API] Returning channel readers",
-		"channel_id", channelID,
-		"reader_count", len(readers))
-
-	response := struct {
-		UserIDs []string `json:"user_ids"`
-	}{
-		UserIDs: readers,
+	// Filter events by timestamp if since parameter is provided
+	if sinceMs > 0 {
+		filteredEvents := make([]store.ReadEvent, 0)
+		for _, event := range events {
+			if event.Timestamp >= sinceMs {
+				filteredEvents = append(filteredEvents, event)
+			}
+		}
+		events = filteredEvents
 	}
 
+	p.logDebug("[API] Returning read receipts",
+		"channel_id", channelID,
+		"event_count", len(events))
+
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
+	if err := json.NewEncoder(w).Encode(events); err != nil {
 		p.logError("[API] Error encoding response",
 			"channel_id", channelID,
 			"error", err.Error())

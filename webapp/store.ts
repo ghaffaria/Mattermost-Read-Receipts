@@ -1,6 +1,7 @@
 // webapp/store.ts
 
-import { Store } from 'redux';
+import { Store, Dispatch } from 'redux';
+import { addReader } from './store/channelReaders';
 
 export interface MattermostUser {
     id: string;
@@ -72,8 +73,16 @@ export const getReadReceipts = (): Record<string, string[]> => {
 };
 
 export const getMessageReadReceipts = (messageId: string): string[] => {
+    if (!messageId) {
+        console.warn('⚠️ [Store] Called getMessageReadReceipts with empty messageId');
+        return [];
+    }
     const users = receiptMap.get(messageId);
-    return users ? Array.from(users) : [];
+    if (!users) {
+        console.log('ℹ️ [Store] No receipts found for message:', messageId);
+        return [];
+    }
+    return Array.from(users);
 };
 
 export const updateReadReceipts = (messageId: string, userId: string): void => {
@@ -102,6 +111,17 @@ export const updateReadReceipts = (messageId: string, userId: string): void => {
             userId,
             afterState: Array.from(users)
         });
+
+        // Get store and dispatch
+        const store = getMattermostStore();
+        if (store) {
+            // Update Redux store
+            store.dispatch(addReader({
+                channelId: '', // Channel ID will be set from the post data
+                postId: messageId,
+                userId: Array.from(users).join(',')
+            }));
+        }
 
         // Dispatch event to trigger UI updates
         const event = new CustomEvent(STORE_UPDATE_EVENT, {
@@ -164,9 +184,17 @@ export const getUserDisplayName = (userId: string): string => {
 // Custom event for store updates
 const STORE_UPDATE_EVENT = 'mattermost-readreceipts_store_update';
 
+interface ReadEvent {
+    MessageID: string;  // backend uses uppercase
+    UserID: string;     // backend uses uppercase
+    ChannelID: string;  // backend uses uppercase
+    Timestamp: number;
+}
+
 interface Receipt {
     message_id: string;
     user_id: string;
+    channel_id: string;
     timestamp: number;
 }
 
@@ -177,7 +205,7 @@ interface ChannelRead {
     last_seen_at: number;
 }
 
-export const loadInitialReceipts = async (channelId: string): Promise<void> => {
+export const loadInitialReceipts = async (channelId: string, dispatch?: Dispatch): Promise<void> => {
     console.log('🔄 [Store] Loading receipts for channel:', channelId);
     
     try {
@@ -211,11 +239,23 @@ export const loadInitialReceipts = async (channelId: string): Promise<void> => {
             throw new Error(`HTTP error! receipts: ${receiptsResponse.status}, reads: ${readsResponse.status}`);
         }
 
-        // Process both responses
-        const [messageReceipts, channelReads] = await Promise.all([
-            receiptsResponse.json() as Promise<Receipt[]>,
+                // Process both responses and handle potential empty responses
+        let [receiptsData, channelReads] = await Promise.all([
+            receiptsResponse.json() as Promise<ReadEvent[]>,
             readsResponse.json() as Promise<ChannelRead[]>
         ]);
+        
+        // Ensure we have arrays even if backend returns null
+        receiptsData = receiptsData || [];
+        channelReads = channelReads || [];
+
+        // Transform the receipts data into our internal format, handling null/empty data
+        const messageReceipts: Receipt[] = (receiptsData || []).map(event => ({
+            message_id: event.MessageID,
+            user_id: event.UserID,
+            channel_id: event.ChannelID,
+            timestamp: event.Timestamp
+        }));
 
         console.log('📥 [Store] Received data:', {
             channelId,
@@ -223,22 +263,30 @@ export const loadInitialReceipts = async (channelId: string): Promise<void> => {
             channelReadsCount: channelReads.length
         });
 
-        // Update channel reads map
+        // Update channel reads map, handling null/empty data
         const channelReadersMap = new Map<string, {lastPostId: string, lastSeenAt: number}>();
-        for (const read of channelReads) {
-            channelReadersMap.set(read.user_id, {
-                lastPostId: read.last_post_id,
-                lastSeenAt: read.last_seen_at
-            });
+        if (channelReads && channelReads.length > 0) {
+            for (const read of channelReads) {
+                if (read && read.user_id && read.last_post_id !== undefined) {
+                    channelReadersMap.set(read.user_id, {
+                        lastPostId: read.last_post_id,
+                        lastSeenAt: read.last_seen_at || 0
+                    });
+                }
+            }
         }
         channelReadsMap.set(channelId, channelReadersMap);
 
         // Process message receipts
         const messageReceiptsMap = new Map<string, Set<string>>();
-        for (const receipt of messageReceipts) {
-            const users = messageReceiptsMap.get(receipt.message_id) || new Set<string>();
-            users.add(receipt.user_id);
-            messageReceiptsMap.set(receipt.message_id, users);
+        if (messageReceipts && messageReceipts.length > 0) {
+            for (const receipt of messageReceipts) {
+                if (receipt && receipt.message_id && receipt.user_id) {
+                    const users = messageReceiptsMap.get(receipt.message_id) || new Set<string>();
+                    users.add(receipt.user_id);
+                    messageReceiptsMap.set(receipt.message_id, users);
+                }
+            }
         }
 
         // Merge channel reads into message receipts
@@ -258,9 +306,19 @@ export const loadInitialReceipts = async (channelId: string): Promise<void> => {
             }
         });
 
-        // Update receipt map with merged data
+        // Update both receipt map and Redux store
         messageReceiptsMap.forEach((users, messageId) => {
+            // Update in-memory map
             receiptMap.set(messageId, users);
+            
+            // Update Redux store if dispatch is available
+            if (dispatch) {
+                dispatch(addReader({
+                    channelId,
+                    postId: messageId,
+                    userId: Array.from(users).join(',') // Store all readers
+                }));
+            }
         });
 
         console.log('💾 [Store] Updated maps:', {

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"fmt"
 
 	"github.com/arg/mattermost-readreceipts/server/types"
@@ -71,5 +72,39 @@ func (s *MySQLStore) InitializeChannelReads() error {
 	if _, err := s.db.Exec(createTable); err != nil {
 		return fmt.Errorf("failed to create channel_reads table: %w", err)
 	}
+	return nil
+}
+
+// UpsertChannelReadTx updates a channel read record within a transaction
+func (s *MySQLStore) UpsertChannelReadTx(tx Tx, read types.ChannelRead) error {
+	sqlTx, ok := tx.(*sql.Tx)
+	if !ok {
+		return fmt.Errorf("invalid transaction type: %T", tx)
+	}
+
+	query := `
+		INSERT INTO channel_reads (channel_id, user_id, last_post_id, last_seen_at)
+		VALUES (?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE
+		last_post_id = CASE
+			WHEN last_seen_at < VALUES(last_seen_at) THEN VALUES(last_post_id)
+			ELSE last_post_id
+		END,
+		last_seen_at = GREATEST(last_seen_at, VALUES(last_seen_at))
+	`
+	result, err := sqlTx.Exec(query, read.ChannelID, read.UserID, read.LastPostID, read.LastSeenAt)
+	if err != nil {
+		return fmt.Errorf("failed to upsert channel read: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get affected rows: %w", err)
+	}
+
+	if rows == 0 {
+		return fmt.Errorf("channel read upsert affected 0 rows: %+v", read)
+	}
+
 	return nil
 }

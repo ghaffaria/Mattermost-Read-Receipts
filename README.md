@@ -1,4 +1,64 @@
 # Mattermost Read Receipts Plugin
+
+WhatsApp / Telegram style "Seen by ..." indicators for every post in Mattermost. Get real-time visibility into who has read messages in your channels.
+
+<p align="center">
+  <img src="image/channel.jpg" width="45%"/>
+  <img src="image/user1.jpg"  width="45%"/>
+</p>
+
+## Architecture and Flow
+
+### Component Overview
+
+```mermaid
+graph TB
+    subgraph Frontend
+        RP[ReadReceiptPlugin]
+        RRO[ReadReceiptRootObserver]
+        PR[PostReceipt Component]
+        VT[VisibilityTracker]
+        RS[Redux Store]
+    end
+    
+    subgraph Backend
+        API[API Endpoints]
+        WS[WebSocket Server]
+        DB[(Database)]
+    end
+    
+    RP -->|Initializes| RS
+    RP -->|Registers| RRO
+    RP -->|Registers| PR
+    RRO -->|Tracks| VT
+    VT -->|Reports Visibility| PR
+    PR -->|Updates| RS
+    RS -->|WebSocket Events| WS
+    WS -->|Real-time Updates| RS
+    PR -->|Read Status| API
+    API -->|Store/Retrieve| DB
+```
+
+### Message Read Flow
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant VT as VisibilityTracker
+    participant C as Client Store
+    participant WS as WebSocket
+    participant S as Server
+    participant DB as Database
+    
+    U->>VT: Views message
+    VT->>VT: Wait 2000ms
+    VT->>C: Mark as read
+    C->>WS: Send read event
+    WS->>S: Forward event
+    S->>DB: Store receipt
+    S->>WS: Broadcast to channel
+    WS->>C: Update UI
+```Read Receipts Plugin
 ## Download
 
 [⬇️ Download pre-built plugin](https://github.com/ghaffaria/Mattermost-Read-Receipts/releases/download/v0.1.2/mattermost-readreceipts-2025.05.26.1827.tar.gz)
@@ -14,17 +74,58 @@ WhatsApp / Telegram style “Seen by …” indicators for every post in Matterm
 
 ---
 
+## Core Components
+
+### Frontend Components
+
+1. **ReadReceiptPlugin** (`webapp/plugin.tsx`)
+   - Entry point for the plugin
+   - Initializes Redux store
+   - Registers WebSocket handlers
+   - Sets up UI components
+
+2. **ReadReceiptRootObserver** (`webapp/components/ReadReceiptRootObserver.tsx`)
+   - Manages visibility tracking
+   - Coordinates with VisibilityTracker
+
+3. **PostReceipt** (`webapp/components/PostReceipt.tsx`)
+   - Renders "Seen by..." indicators
+   - Handles real-time updates
+
+4. **VisibilityTracker** (`webapp/components/VisibilityTracker.tsx`)
+   - Uses Intersection Observer API
+   - Tracks message visibility
+   - Triggers read events
+
+### Backend Components
+
+1. **Plugin Server** (`server/plugin.go`)
+   - Main plugin implementation
+   - Handles initialization
+   - Manages database connections
+
+2. **API Handler** (`server/api.go`)
+   - REST endpoints implementation
+   - WebSocket event handling
+   - Authentication middleware
+
+3. **Store Layer** (`server/store/`)
+   - Database interactions
+   - Supports MySQL and PostgreSQL
+   - Handles migrations
+
 ## Features
-|                                                           |                                        |
-|-----------------------------------------------------------|----------------------------------------|
-| **Real-time tracking** | Intersection Observer + WebSockets |
-| **Accurate**           | fires only after a message is visible ≥ 2 s |
-| **Persistent**         | receipts stored in the same DB that Mattermost uses |
-| **Resilient**         | handles deleted posts gracefully |
-| **Two-level tracking**| per-post and per-channel read status |
-| **UI**                 | WhatsApp-like inline badges:<br> `Seen by Ali, Sam` |
-| **Admin-friendly**     | SysConsole settings, debug REST endpoints, structured logs |
-| **House-keeping**      | automatic DB clean-up (retention_days) |
+
+| Feature | Implementation Details |
+|---------|----------------------|
+| **Real-time tracking** | Uses Intersection Observer + WebSockets |
+| **Accurate reading** | 2-second visibility threshold |
+| **Persistent storage** | Shared database with Mattermost |
+| **Resilient** | Handles deleted posts gracefully |
+| **Two-level tracking** | Per-post and per-channel status |
+| **Modern UI** | WhatsApp-style inline badges |
+| **Admin tools** | Debug endpoints and structured logs |
+| **Maintenance** | Automatic database cleanup |
 
 ---
 

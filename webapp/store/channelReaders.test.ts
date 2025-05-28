@@ -19,27 +19,31 @@ describe('channelReaders slice', () => {
     });
 
     test('selectReaders should return an empty array if no readers exist', () => {
-        const readers = selectReaders('non-existent-channel', 'non-existent-post')(getState());
+        const state = getState();
+        const readers = selectReaders(state, 'non-existent-channel', 'non-existent-post');
         expect(readers).toEqual([]);
     });
 
     test('addReader should add a reader to the state', () => {
         store.dispatch(addReader({ channelId: 'test-channel', postId: 'test-post', userId: 'user1' }));
-        const readers = selectReaders('test-channel', 'test-post')(getState());
+        const state = getState();
+        const readers = selectReaders(state, 'test-channel', 'test-post');
         expect(readers).toEqual(['user1']);
     });
 
     test('addReader should not add duplicate readers', () => {
         store.dispatch(addReader({ channelId: 'test-channel', postId: 'test-post', userId: 'user1' }));
         store.dispatch(addReader({ channelId: 'test-channel', postId: 'test-post', userId: 'user1' }));
-        const readers = selectReaders('test-channel', 'test-post')(getState());
+        const state = getState();
+        const readers = selectReaders(state, 'test-channel', 'test-post');
         expect(readers).toEqual(['user1']);
     });
 
     test('setReaders should overwrite existing readers', () => {
         store.dispatch(addReader({ channelId: 'test-channel', postId: 'test-post', userId: 'user1' }));
         store.dispatch(setReaders({ channelId: 'test-channel', payload: { 'test-post': ['user2'] } }));
-        const readers = selectReaders('test-channel', 'test-post')(getState());
+        const state = getState();
+        const readers = selectReaders(state, 'test-channel', 'test-post');
         expect(readers).toEqual(['user2']);
     });
 });
