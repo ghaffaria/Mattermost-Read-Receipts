@@ -5,7 +5,7 @@ import {PluginRegistry} from 'mattermost-webapp/plugins/registry';
 import PostReceipt from './components/PostReceipt';
 import {handleWebSocketEvent, setupWebsocket} from './websocket';
 import {loadInitialReceipts, fetchPluginConfig, loadChannelReads} from './store';
-import { store, setMattermostStore, isStoreInitialized } from './store/pluginStore';
+import { store as pluginGlobalStoreInstance, setMattermostStore, isStoreInitialized } from './store/pluginStore';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import ReadReceiptRootObserver from './components/ReadReceiptRootObserver';
 import { Provider } from 'react-redux';
@@ -19,7 +19,7 @@ interface PostProps {
 export default class ReadReceiptPlugin {
     async initialize(registry: PluginRegistry, mattermostStore: any) {
         console.log('🔌 [ReadReceiptPlugin] Initializing...');
-        
+        console.log('DEBUG: Top-level pluginGlobalStoreInstance:', pluginGlobalStoreInstance);
         try {
             console.log('DEBUG: Calling setMattermostStore with:', mattermostStore);
             if (!mattermostStore?.getState) {
@@ -45,7 +45,7 @@ export default class ReadReceiptPlugin {
                     console.error('❌ [ReadReceiptPlugin] Failed to fetch config:', err);
                     return { visibilityThresholdMs: 2000 };
                 }),
-                setupWebsocket(store.dispatch).catch(err => {
+                setupWebsocket(pluginGlobalStoreInstance.dispatch).catch(err => {
                     console.error('❌ [ReadReceiptPlugin] Failed to setup WebSocket:', err);
                 })
             ]);
@@ -54,7 +54,7 @@ export default class ReadReceiptPlugin {
             if (currentChannelId) {
                 console.log('📥 [ReadReceiptPlugin] Pre-loading receipts for channel:', currentChannelId);
                 await Promise.all([
-                    loadInitialReceipts(currentChannelId, store.dispatch).catch(err => {
+                    loadInitialReceipts(currentChannelId, pluginGlobalStoreInstance.dispatch).catch(err => {
                         console.error('❌ [ReadReceiptPlugin] Failed to load receipts:', err);
                     }),
                     loadChannelReads(currentChannelId).catch(err => {
@@ -64,32 +64,23 @@ export default class ReadReceiptPlugin {
                 console.log('✅ [ReadReceiptPlugin] Pre-loaded receipts successfully');
             }
 
-            // Register wrapped root component
-            registry.registerRootComponent(() => {
-                console.log('DEBUG: Plugin Store for ReadReceiptRootObserver Provider:', store);
-                return (
-                    <ErrorBoundary>
-                        <Provider store={store}>
-                            <ReadReceiptRootObserver />
-                        </Provider>
-                    </ErrorBoundary>
-                );
-            });
-
             // Register post component with error boundary
             try {
                 if ((registry as any).registerPostTypeComponent) {
                     console.log('🧩 [ReadReceiptPlugin] Registering post component...');
                     (registry as any).registerPostTypeComponent(
                         (props: PostProps) => {
-                            console.log('DEBUG: Plugin Store for PostReceipt Provider:', store);
+                            console.log('DEBUG: Store instance for registerPostTypeComponent Provider:', pluginGlobalStoreInstance);
+                            if (!pluginGlobalStoreInstance) {
+                                console.error("CRITICAL DEBUG: pluginGlobalStoreInstance is null/undefined for PostReceipt Provider!");
+                            }
                             if (!props?.post?.id || props.post.type !== '') {
                                 return null;
                             }
                             console.log('[ReadReceiptPlugin] Rendering for post:', props.post.id);
                             return (
                                 <ErrorBoundary>
-                                    <Provider store={store}>
+                                    <Provider store={pluginGlobalStoreInstance}>
                                         <PostReceipt post={props.post} />
                                     </Provider>
                                 </ErrorBoundary>
@@ -102,12 +93,27 @@ export default class ReadReceiptPlugin {
                 console.error('❌ [ReadReceiptPlugin] Error in registerPostTypeComponent:', error);
             }
 
+            // Register wrapped root component
+            registry.registerRootComponent(() => {
+                console.log('DEBUG: Store instance for ReadReceiptRootObserver Provider:', pluginGlobalStoreInstance);
+                if (!pluginGlobalStoreInstance) {
+                    console.error("CRITICAL DEBUG: pluginGlobalStoreInstance is null/undefined for RootObserver Provider!");
+                }
+                return (
+                    <ErrorBoundary>
+                        <Provider store={pluginGlobalStoreInstance}>
+                            <ReadReceiptRootObserver />
+                        </Provider>
+                    </ErrorBoundary>
+                );
+            });
+
             // Register WebSocket handler
             try {
                 console.log('🔌 [ReadReceiptPlugin] Registering WebSocket handler...');
                 registry.registerWebSocketEventHandler(
                     'custom_mattermost-readreceipts_read_receipt',
-                    handleWebSocketEvent(store.dispatch)
+                    handleWebSocketEvent(pluginGlobalStoreInstance.dispatch)
                 );
                 console.log('✅ [ReadReceiptPlugin] WebSocket handler registered');
             } catch (error) {

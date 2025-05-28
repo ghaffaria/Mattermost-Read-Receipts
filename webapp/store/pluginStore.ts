@@ -72,7 +72,7 @@ const createStore = (): EnhancedStore => {
             channelReaders: channelReadersReducer,
         },
         preloadedState: persistedState || {
-            channelReaders: {},
+            channelReaders: {}, // Ensure this is not undefined
         },
         middleware: (getDefaultMiddleware) => getDefaultMiddleware({
             serializableCheck: isDevelopment,

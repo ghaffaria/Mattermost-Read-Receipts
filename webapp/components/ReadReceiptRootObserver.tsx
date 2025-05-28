@@ -3,6 +3,9 @@ import React, { useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import PostReceipt from './PostReceipt';
 import { Post } from '../types/mattermost-webapp';
+import { Provider } from 'react-redux';
+import { store as pluginStore } from '../store/pluginStore';
+import { ErrorBoundary } from './ErrorBoundary';
 
 interface MattermostState {
     entities: {
@@ -87,20 +90,17 @@ const ReadReceiptRootObserver: React.FC = () => {
             const post = state?.entities?.posts?.posts?.[postId];
             const channelId = post?.channel_id;
 
-            console.log('🎨 [RootObserver] Rendering PostReceipt for:', {
-                postId,
-                authorId,
-                channelId,
-                source: 'redux_store'
-            });
-
-            if (!channelId) {
-                console.warn('⚠️ [RootObserver] Could not find channel_id for post:', postId);
+            console.log('🎨 [RootObserver] Rendering PostReceipt for:', { postId, authorId, channelId });
+            if (!pluginStore) {
+                console.error('CRITICAL DEBUG: [RootObserver] pluginStore is null/undefined before ReactDOM.render!');
                 return;
             }
-
             ReactDOM.render(
-                <PostReceipt post={{ id: postId, user_id: authorId, channel_id: channelId }} />,
+                <ErrorBoundary>
+                    <Provider store={pluginStore}>
+                        <PostReceipt post={{ id: postId, user_id: authorId, channel_id: channelId } as Post} />
+                    </Provider>
+                </ErrorBoundary>,
                 receiptContainer
             );
         }

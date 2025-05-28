@@ -1,18 +1,20 @@
 // webapp/components/PostReceipt.tsx
 import React, { FC, ReactElement } from 'react';
-import { useSelector } from 'react-redux';
-import { getUserDisplayName, RECEIPT_STORE_UPDATE } from '../store';
-import { selectReaders } from '../store/channelReaders';
+import { useSelector, useStore } from 'react-redux';
 import { ensureStoreInitialized } from '../store/pluginStore';
 import VisibilityTracker from './VisibilityTracker';
 import { Post } from '../types/mattermost-webapp';
 import { RootState } from '../store/types';
+import { selectReaders } from '../store/channelReaders';
 
 interface PostReceiptProps {
     post: Post;
 }
 
 const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
+    const contextStore = useStore();
+    console.log('DEBUG: useStore() in PostReceipt context:', contextStore);
+
     console.log('DEBUG: PostReceipt rendering, calling ensureStoreInitialized...');
     try {
         ensureStoreInitialized();
@@ -33,9 +35,22 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
         }
 
         const messageId = post.id;
-        const [seenBy, setSeenBy] = React.useState<string[]>([]);
-        const [hasLoadedState, setHasLoadedState] = React.useState(false);
-        
+        const readerIds = useSelector((state: RootState) => {
+            console.log('DEBUG: [PostReceipt] State in useSelector for post:', post.id, JSON.stringify(state));
+            if (!state) {
+                console.error('CRITICAL DEBUG: [PostReceipt] state is null/undefined inside useSelector for post:', post.id);
+                return [];
+            }
+            if (!state.channelReaders) {
+                console.warn('⚠️ [PostReceipt] Redux state.channelReaders is missing for post:', post.id, 'State keys:', Object.keys(state));
+                return [];
+            }
+            return selectReaders(state, post.channel_id, messageId);
+        });
+
+        console.log('DEBUG: [PostReceipt] readerIds:', readerIds);
+        console.log('DEBUG: [PostReceipt] readerIds after useSelector:', readerIds, 'for post:', messageId);
+
         // Get current user ID
         const currentUserId = document.cookie.match(/MMUSERID=([^;]+)/)?.[1] || 
                              window.localStorage.getItem('MMUSERID') || '';
@@ -49,58 +64,27 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
         // Check if this is the user's own message
         const isOwnMessage = post.user_id === currentUserId;
 
-        // Get readers from Redux store using proper selector with null check
-        const readerIds = useSelector((state: RootState) => {
-            console.log('DEBUG: State received in useSelector for post:', post.id, JSON.stringify(state));
-            if (!state) {
-                console.warn('⚠️ [PostReceipt] Redux state is null/undefined in useSelector for post:', post.id);
-                return [];
-            }
-            if (!state.channelReaders) {
-                console.warn('⚠️ [PostReceipt] Redux state.channelReaders not initialized for post:', post.id, 'State keys:', Object.keys(state));
-                return [];
-            }
-            return selectReaders(state, post.channel_id, messageId);
-        });
+        // Determine if the message has been seen by the current user (using channelReaders only)
+        const seenBy = readerIds.includes(currentUserId);
 
-        // Update local state when Redux state changes
-        React.useEffect(() => {
-            console.log('📥 [PostReceipt] Readers updated from Redux:', {
-                messageId,
-                readerIds,
-                isOwnMessage,
-                currentUserId,
-                timestamp: new Date().toISOString()
-            });
-            setSeenBy(readerIds);
-            setHasLoadedState(true);
-        }, [messageId, readerIds, isOwnMessage, currentUserId]);
+        console.log('DEBUG: [PostReceipt] seenBy:', seenBy);
 
-        // Don't render until we have the initial state
-        if (!hasLoadedState) {
+        // Render nothing if the message is not seen by the current user and it's not their own message
+        if (!seenBy && !isOwnMessage) {
+            console.log('DEBUG: [PostReceipt] Message not seen by user and not own message, not rendering receipt.');
             return null;
         }
 
         // Filter out current user from display list if this is their message
-        const seenByOthers = isOwnMessage ? 
-            seenBy.filter(id => id !== currentUserId) : 
-            seenBy;
+        const seenByOthers = isOwnMessage ? readerIds.filter(id => id !== currentUserId) : readerIds;
 
         // Get display names for readers
         const seenByOthersDisplay = seenByOthers.map(userId => {
-            try {
-                return getUserDisplayName(userId);
-            } catch (error) {
-                console.warn(`⚠️ [PostReceipt] Could not get display name for user ${userId}:`, error);
-                return userId;
-            }
+            // You may want to implement a getUserDisplayName util or use userId directly
+            return userId;
         });
 
-        // Don't show anything if no other users have seen the message
-        if (seenByOthers.length === 0) {
-            return null;
-        }
-
+        // If the message is seen or it's the user's own message, render the receipt
         return (
             <div 
                 className="post-receipt-container" 
@@ -118,7 +102,6 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
                         key={`tracker-${messageId}`}
                     />
                 )}
-                
                 {seenByOthers.length > 0 && (
                     <div 
                         className="post-receipt" 
