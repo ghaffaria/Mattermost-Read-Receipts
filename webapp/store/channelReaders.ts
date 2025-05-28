@@ -41,7 +41,7 @@ const channelReadersSlice = createSlice({
                 state[channelId] = {};
             }
             state[channelId] = { ...state[channelId], ...payload };
-            console.log('DEBUG: [Redux Reducer] State after setReaders on Ali (sender) client:', JSON.stringify(state));
+            console.log('DEBUG: [Redux Reducer] State after setReaders on Ali (sender) client for channel', channelId, ':', JSON.stringify(state[channelId]));
         },
         addReader: (
             state: ChannelReadersState,
@@ -62,7 +62,7 @@ const channelReadersSlice = createSlice({
             if (!state[channelId][postId].includes(userId)) {
                 state[channelId][postId].push(userId);
             }
-            console.log('DEBUG: [Redux Reducer] State after addReader on Ali (sender) client:', JSON.stringify(state));
+            console.log('DEBUG: [Redux Reducer] State after addReader on Ali (sender) client for channel', channelId, 'post', postId, ':', JSON.stringify(state[channelId]?.[postId]));
         },
     },
 });

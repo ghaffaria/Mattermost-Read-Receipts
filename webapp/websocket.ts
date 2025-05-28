@@ -32,8 +32,10 @@ let globalWebSocket: WebSocket | null = null;
 export function handleWebSocketEvent(dispatch: Dispatch) {
     return function(event: MessageEvent) {
         try {
-            const { data } = event;
-            const eventData = JSON.parse(data);
+            const rawData = event.data;
+            // Log raw data for debugging
+            console.log('DEBUG: [WebSocket] Raw event data received on Ali (sender) client:', rawData);
+            const eventData = JSON.parse(rawData);
             const eventName = eventData?.event || '';
 
             // Log all received events for debugging (Ali's client)

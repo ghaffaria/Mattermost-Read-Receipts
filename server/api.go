@@ -244,6 +244,7 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Broadcast receipt via WebSocket
+	p.logDebug("Attempting to publish WebSocket event", "event", WebSocketEventReadReceipt, "channelID", channelID, "userID", userID, "messageID", req.MessageID)
 	p.PublishReadReceipt(channelID, req.MessageID, userID, now)
 
 	// Write success response

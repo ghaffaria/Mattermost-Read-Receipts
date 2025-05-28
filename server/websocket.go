@@ -12,6 +12,7 @@ const (
 
 // PublishReadReceipt publishes a WebSocket event when a message is read
 func (p *Plugin) PublishReadReceipt(channelID, messageID, userID string, timestamp int64) {
+	p.API.LogDebug("Broadcasting WebSocketEventReadReceipt", "channelID", channelID, "userID", userID, "messageID", messageID, "timestamp", timestamp)
 	p.API.PublishWebSocketEvent(
 		WebSocketEventReadReceipt,
 		map[string]interface{}{
@@ -28,6 +29,7 @@ func (p *Plugin) PublishReadReceipt(channelID, messageID, userID string, timesta
 
 // PublishChannelReadersUpdate publishes a websocket event when UpsertChannelRead succeeds
 func (p *Plugin) PublishChannelReadersUpdate(channelID, lastPostID string, userIDs []string) {
+	p.API.LogDebug("Broadcasting WebSocketEventChannelReadersUpdate", "channelID", channelID, "lastPostID", lastPostID, "userIDs", userIDs)
 	p.API.PublishWebSocketEvent(
 		WebSocketEventChannelReaders,
 		map[string]interface{}{
