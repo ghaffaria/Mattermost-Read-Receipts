@@ -5,10 +5,11 @@ import {PluginRegistry} from 'mattermost-webapp/plugins/registry';
 import PostReceipt from './components/PostReceipt';
 import {handleWebSocketEvent, setupWebsocket} from './websocket';
 import {loadInitialReceipts, fetchPluginConfig, loadChannelReads} from './store';
-import { store, setMattermostStore } from './store/pluginStore';
+import { store, setMattermostStore, isStoreInitialized } from './store/pluginStore';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import ReadReceiptRootObserver from './components/ReadReceiptRootObserver';
 import { Provider } from 'react-redux';
+
 import { Post } from './types/mattermost-webapp';
 
 interface PostProps {
@@ -25,25 +26,39 @@ export default class ReadReceiptPlugin {
                 throw new Error('Invalid Mattermost store provided');
             }
 
-            // Initialize Redux store first
+            // Initialize Redux store first and wait for it to complete
             await setMattermostStore(mattermostStore);
             
+            // Only proceed if store is properly initialized
+            if (!isStoreInitialized()) {
+                throw new Error('Store failed to initialize properly');
+            }
+
             // Pre-load initial data to populate Redux store
             const state = mattermostStore.getState();
             const currentChannelId = state?.entities?.channels?.currentChannelId;
             
             // Initialize WebSocket and fetch plugin configuration in parallel
             const [config] = await Promise.all([
-                fetchPluginConfig(),
-                setupWebsocket(store.dispatch) // Use our store's dispatch
+                fetchPluginConfig().catch(err => {
+                    console.error('❌ [ReadReceiptPlugin] Failed to fetch config:', err);
+                    return { visibilityThresholdMs: 2000 };
+                }),
+                setupWebsocket(store.dispatch).catch(err => {
+                    console.error('❌ [ReadReceiptPlugin] Failed to setup WebSocket:', err);
+                })
             ]);
 
             // Pre-load receipts for current channel if available
             if (currentChannelId) {
                 console.log('📥 [ReadReceiptPlugin] Pre-loading receipts for channel:', currentChannelId);
                 await Promise.all([
-                    loadInitialReceipts(currentChannelId, store.dispatch),
-                    loadChannelReads(currentChannelId)
+                    loadInitialReceipts(currentChannelId, store.dispatch).catch(err => {
+                        console.error('❌ [ReadReceiptPlugin] Failed to load receipts:', err);
+                    }),
+                    loadChannelReads(currentChannelId).catch(err => {
+                        console.error('❌ [ReadReceiptPlugin] Failed to load channel reads:', err);
+                    })
                 ]);
                 console.log('✅ [ReadReceiptPlugin] Pre-loaded receipts successfully');
             }

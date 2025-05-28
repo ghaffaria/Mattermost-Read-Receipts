@@ -1,13 +1,28 @@
 import { Store } from 'redux';
-import { configureStore } from '@reduxjs/toolkit';
+import { configureStore, EnhancedStore } from '@reduxjs/toolkit';
 import { setMattermostStore as setLegacyMattermostStore } from './legacyStore';
 import channelReadersReducer from './channelReaders';
 
-// Determine if we're in development mode
+// Store types
+export interface StoreState {
+    channelReaders: {
+        [channelId: string]: {
+            [messageId: string]: string[];
+        };
+    };
+}
+
+// Store configuration
+const STORE_STATE_KEY = 'mattermost_readreceipts_state';
+const STORE_INITIALIZED_KEY = 'mattermost_readreceipts_initialized';
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 1000;
+
+// Development mode detection
 const isDevelopment = window.location.hostname === 'localhost' || 
                      window.location.hostname === '127.0.0.1';
 
-// Log Redux actions in development
+// Logger middleware for development
 const logger = (store: any) => (next: any) => (action: any) => {
     if (isDevelopment) {
         console.log('🔄 [Redux] Dispatching:', { type: action.type, payload: action.payload });
@@ -19,41 +34,97 @@ const logger = (store: any) => (next: any) => (action: any) => {
     return result;
 };
 
-// Create our Redux store with initial state
-export const store = configureStore({
-    reducer: {
-        channelReaders: channelReadersReducer,
-    },
-    preloadedState: {
-        channelReaders: {},
-    },
-    middleware: (getDefaultMiddleware) => getDefaultMiddleware({
-        serializableCheck: isDevelopment,
-        immutableCheck: isDevelopment,
-        thunk: true,
-    }).concat(logger),
-    devTools: isDevelopment
-});
+// Load persisted state
+const loadState = (): Partial<StoreState> | undefined => {
+    try {
+        const serializedState = localStorage.getItem(STORE_STATE_KEY);
+        if (serializedState === null) {
+            return undefined;
+        }
+        return JSON.parse(serializedState);
+    } catch (err) {
+        console.error('❌ [Store] Failed to load state:', err);
+        return undefined;
+    }
+};
 
-// Store initialization status
+// Save state to persistent storage
+const saveState = (state: StoreState) => {
+    try {
+        const serializedState = JSON.stringify(state);
+        localStorage.setItem(STORE_STATE_KEY, serializedState);
+        localStorage.setItem(STORE_INITIALIZED_KEY, 'true');
+    } catch (err) {
+        console.error('❌ [Store] Failed to save state:', err);
+    }
+};
+
+// Store initialization state
+let storeInstance: EnhancedStore | null = null;
 let storeInitialized = false;
 
-// Ensure store is initialized
+// Create store singleton with persistence
+const createStore = (): EnhancedStore => {
+    const persistedState = loadState();
+    
+    const store = configureStore({
+        reducer: {
+            channelReaders: channelReadersReducer,
+        },
+        preloadedState: persistedState || {
+            channelReaders: {},
+        },
+        middleware: (getDefaultMiddleware) => getDefaultMiddleware({
+            serializableCheck: isDevelopment,
+            immutableCheck: isDevelopment,
+            thunk: true,
+        }).concat(logger),
+        devTools: isDevelopment
+    });
+
+    // Subscribe to store changes for persistence
+    store.subscribe(() => {
+        if (storeInitialized) {
+            const state = store.getState();
+            saveState(state);
+        }
+    });
+
+    return store;
+};
+
+// Get or create store instance
+export const getStore = (): EnhancedStore => {
+    if (!storeInstance) {
+        storeInstance = createStore();
+    }
+    return storeInstance;
+};
+
+// Initialize the store singleton
+export const store = getStore();
+
+// Helper to check store initialization
+export const isStoreInitialized = () => {
+    return storeInitialized && localStorage.getItem(STORE_INITIALIZED_KEY) === 'true';
+};
+
+// Set store initialization flag
+export const markStoreInitialized = () => {
+    storeInitialized = true;
+    localStorage.setItem(STORE_INITIALIZED_KEY, 'true');
+};
+
+// Ensure store is ready for use
 export const ensureStoreInitialized = () => {
-    if (!storeInitialized) {
+    if (!isStoreInitialized()) {
         console.error('❌ [Store] Attempting to use store before initialization');
         throw new Error('Store not initialized');
     }
 };
 
-// Export the RootState and AppDispatch types from the store
-export type RootState = ReturnType<typeof store.getState>;
-export type AppDispatch = typeof store.dispatch;
-
 // Initialize stores with retry logic
 let initializationPromise: Promise<void> | null = null;
-const MAX_RETRIES = 3;
-const RETRY_DELAY = 1000;
 
 export const setMattermostStore = async (mattermostStore: Store<any>): Promise<void> => {
     if (initializationPromise) {
@@ -82,7 +153,9 @@ export const setMattermostStore = async (mattermostStore: Store<any>): Promise<v
                     userProfiles: profileCount
                 });
 
+                // Mark store as initialized
                 storeInitialized = true;
+                localStorage.setItem(STORE_INITIALIZED_KEY, 'true');
                 resolve();
             } catch (error) {
                 if (retryCount < MAX_RETRIES) {
@@ -101,3 +174,7 @@ export const setMattermostStore = async (mattermostStore: Store<any>): Promise<v
 
     return initializationPromise;
 };
+
+// Type exports
+export type RootState = StoreState;
+export type AppDispatch = typeof store.dispatch;
