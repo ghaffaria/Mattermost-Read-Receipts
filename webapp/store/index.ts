@@ -2,6 +2,7 @@ import { configureStore, combineReducers } from '@reduxjs/toolkit';
 import channelReadersReducer from './channelReaders';
 import { loadChannelReads } from '../store';
 import type { RootState } from './types';
+import { getPluginStore } from './legacyStore'; // 👈 fetch our plugin Redux store
 
 // Combine our reducers
 const rootReducer = combineReducers({
@@ -10,7 +11,6 @@ const rootReducer = combineReducers({
 });
 
 // Create the store
-const reduxStore = configureStore({
     reducer: rootReducer,
 });
 
@@ -29,6 +29,10 @@ export * from './legacyStore';
 
 // Utility: Ensure channel reads are loaded on channel switch
 export const ensureChannelReadsOnSwitch = (store: any) => {
+    if ((window as any).__ensuredCRSwitch) {
+        return; // already wired
+    }
+    (window as any).__ensuredCRSwitch = true;
     store.subscribe(() => {
         const chan = store.getState().entities.channels.currentChannelId;
         if (chan && chan !== (window as any).__lastCRChan) {

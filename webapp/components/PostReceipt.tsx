@@ -6,6 +6,7 @@ import VisibilityTracker from './VisibilityTracker';
 import { Post } from '../types/mattermost-webapp';
 import { RootState } from '../store/types';
 import { selectReaders } from '../store/channelReaders';
+import styles from './PostReceipt.module.css';
 
 interface PostReceiptProps {
     post: Post;
@@ -65,7 +66,7 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
         // If the state hasn't loaded yet, show skeleton
         if (!hasLoadedState) {
             console.log('DEBUG: [PostReceipt] hasLoadedState is false, showing skeleton for post:', messageId);
-            return (<span className="seen-skeleton">✓✓</span>);
+            return (<span className={styles['seen-skeleton']}>✓✓</span>);
         }
 
         // If there are no readers, don't render the receipt (but still render VisibilityTracker if not own message)
