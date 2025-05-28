@@ -47,22 +47,47 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
             }
             return selectReaders(state, post.channel_id, messageId);
         });
-
         console.log('DEBUG: [PostReceipt] readerIds:', readerIds);
         console.log('DEBUG: [PostReceipt] readerIds after useSelector:', readerIds, 'for post:', messageId);
 
         // Get current user ID
         const currentUserId = document.cookie.match(/MMUSERID=([^;]+)/)?.[1] || 
                              window.localStorage.getItem('MMUSERID') || '';
+        // Check if this is the user's own message
+        const isOwnMessage = post.user_id === currentUserId;
+
+        // Track if state has loaded
+        const [hasLoadedState, setHasLoadedState] = React.useState(false);
+        React.useEffect(() => {
+            setHasLoadedState(true);
+        }, [readerIds, messageId, isOwnMessage, currentUserId]);
+
+        // If the state hasn't loaded yet, don't render
+        if (!hasLoadedState) {
+            console.log('DEBUG: [PostReceipt] hasLoadedState is false, returning null for post:', messageId);
+            return null;
+        }
+
+        // If there are no readers, don't render the receipt (but still render VisibilityTracker if not own message)
+        if (readerIds.length === 0) {
+            if (!isOwnMessage) {
+                return (
+                    <VisibilityTracker 
+                        messageId={messageId} 
+                        postAuthorId={post.user_id}
+                        channelId={post.channel_id}
+                        key={`tracker-${messageId}`}
+                    />
+                );
+            }
+            return null;
+        }
 
         // Early return if no user ID (not logged in)
         if (!currentUserId) {
             console.warn('⚠️ [PostReceipt] No current user ID found');
             return null;
         }
-
-        // Check if this is the user's own message
-        const isOwnMessage = post.user_id === currentUserId;
 
         // Determine if the message has been seen by the current user (using channelReaders only)
         const seenBy = readerIds.includes(currentUserId);

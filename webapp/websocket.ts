@@ -36,6 +36,9 @@ export function handleWebSocketEvent(dispatch: Dispatch) {
             const eventData = JSON.parse(data);
             const eventName = eventData?.event || '';
 
+            // Log all received events for debugging (Ali's client)
+            console.log('DEBUG: [WebSocket] Event received on Ali (sender) client:', { eventName, eventData });
+
             if (!eventData) {
                 console.warn('⚠️ [WebSocket] Empty event received');
                 return;
@@ -45,6 +48,8 @@ export function handleWebSocketEvent(dispatch: Dispatch) {
             if (eventName.includes('channel_readers')) {
                 const data = eventData as unknown as { ChannelID: string; LastPostID: string; UserIDs: string[] };
                 if (data.ChannelID && data.LastPostID && Array.isArray(data.UserIDs)) {
+                    // Log before dispatching setReaders
+                    console.log('DEBUG: [WebSocket] Dispatching setReaders on Ali (sender) client:', { channelId: data.ChannelID, payload: { [data.LastPostID]: data.UserIDs } });
                     dispatch(setReaders({
                         channelId: data.ChannelID,
                         payload: { [data.LastPostID]: data.UserIDs }
@@ -70,7 +75,8 @@ export function handleWebSocketEvent(dispatch: Dispatch) {
                     channel_id,
                     username: getUserDisplayName(user_id)
                 });
-
+                // Log before dispatching addReader
+                console.log('DEBUG: [WebSocket] Dispatching addReader on Ali (sender) client:', { channelId: channel_id || '', postId: message_id, userId: user_id });
                 updateReadReceipts(message_id, user_id);
                 dispatch(addReader({ 
                     channelId: channel_id || '',

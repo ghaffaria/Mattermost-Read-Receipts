@@ -28,7 +28,6 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({
 
     const getUserId = (): string => {
         let userId = window.localStorage.getItem('MMUSERID');
-        
         if (!userId) {
             const match = document.cookie.match(/MMUSERID=([^;]+)/);
             if (match) {
@@ -36,21 +35,23 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({
                 window.localStorage.setItem('MMUSERID', userId);
             }
         }
-        
         if (!userId) {
             console.error('❌ [VisibilityTracker] Missing MMUSERID');
         }
-        
+        console.log('DEBUG: [VisibilityTracker] getUserId result:', userId);
         return userId || '';
     };
 
     const shouldTrackVisibility = (): boolean => {
         const currentUserId = getUserId();
-        // Skip tracking if this is our own message
-        return currentUserId !== postAuthorId;
+        const track = currentUserId !== postAuthorId;
+        console.log(`DEBUG: [VisibilityTracker] shouldTrackVisibility for ${messageId}: currentUserId=${currentUserId}, postAuthorId=${postAuthorId}, shouldTrack=${track}`);
+        return track;
     };
 
     const sendReadReceipt = async () => {
+        // Log before fetch call, show hasSent and shouldTrackVisibility
+        console.log(`INFO: [VisibilityTracker] Attempting to send read receipt for ${messageId}. Conditions: hasSent=${hasSent}, shouldTrack=${shouldTrackVisibility()}`);
         if (hasSent || !shouldTrackVisibility()) {
             if (timerRef.current) {
                 clearInterval(timerRef.current);
@@ -158,6 +159,8 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({
 
         if (visibilityStartTime.current && !hasSent) {
             const visibilityDuration = Date.now() - visibilityStartTime.current;
+            // Log the threshold value for debugging
+            console.log(`DEBUG: [VisibilityTracker] Using visibilityThresholdMs: ${visibilityThresholdMs} for message ${messageId}`);
             if (visibilityDuration >= visibilityThresholdMs) {
                 console.log(`⌛ [VisibilityTracker] Visibility threshold reached for ${messageId}:`, {
                     duration: visibilityDuration,
@@ -172,10 +175,11 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({
     const handleVisibilityChange = debounce((entries: IntersectionObserverEntry[]) => {
         const entry = entries[0];
         isElementVisible.current = entry.isIntersecting;
-        
+        // Add detailed log for visibility change
         console.log(`👁️ [VisibilityTracker] Visibility changed for ${messageId}:`, {
             isVisible: isElementVisible.current,
-            visibility: Math.round(entry.intersectionRatio * 100) + '%',
+            intersectionRatio: entry.intersectionRatio,
+            isIntersecting: entry.isIntersecting,
             isTabActive: isTabVisible.current
         });
 
@@ -206,21 +210,17 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({
             hasExistingObserver: !!observerRef.current,
             hasElement: !!elementRef.current
         });
-        
         // Set up visibility observer
         if (elementRef.current && !observerRef.current) {
             observerRef.current = new IntersectionObserver(handleVisibilityChange, {
                 threshold: [0.5],
                 rootMargin: '0px'
             });
-            
             observerRef.current.observe(elementRef.current);
             console.log(`👀 [VisibilityTracker] Observer attached to element for ${messageId}`);
         }
-
         // Set up tab visibility listener
         document.addEventListener('visibilitychange', handleTabVisibilityChange);
-
         return () => {
             console.log(`🧹 [VisibilityTracker] Cleaning up observers for ${messageId}`);
             resetVisibilityTimer();
