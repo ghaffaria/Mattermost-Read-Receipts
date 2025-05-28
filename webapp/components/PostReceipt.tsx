@@ -62,10 +62,10 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
             setHasLoadedState(true);
         }, [readerIds, messageId, isOwnMessage, currentUserId]);
 
-        // If the state hasn't loaded yet, don't render
+        // If the state hasn't loaded yet, show skeleton
         if (!hasLoadedState) {
-            console.log('DEBUG: [PostReceipt] hasLoadedState is false, returning null for post:', messageId);
-            return null;
+            console.log('DEBUG: [PostReceipt] hasLoadedState is false, showing skeleton for post:', messageId);
+            return (<span className="seen-skeleton">✓✓</span>);
         }
 
         // If there are no readers, don't render the receipt (but still render VisibilityTracker if not own message)

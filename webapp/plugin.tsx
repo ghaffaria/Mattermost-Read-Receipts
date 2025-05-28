@@ -3,8 +3,9 @@ import React from 'react';
 // @ts-ignore
 import {PluginRegistry} from 'mattermost-webapp/plugins/registry';
 import PostReceipt from './components/PostReceipt';
-import {handleWebSocketEvent, setupWebsocket} from './websocket';
+import {handleWebSocketEvent} from './websocket';
 import {loadInitialReceipts, fetchPluginConfig, loadChannelReads} from './store';
+import { ensureChannelReadsOnSwitch } from './store/index';
 import { store as pluginGlobalStoreInstance, setMattermostStore, isStoreInitialized } from './store/pluginStore';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import ReadReceiptRootObserver from './components/ReadReceiptRootObserver';
@@ -44,9 +45,6 @@ export default class ReadReceiptPlugin {
                 fetchPluginConfig().catch(err => {
                     console.error('❌ [ReadReceiptPlugin] Failed to fetch config:', err);
                     return { visibilityThresholdMs: 2000 };
-                }),
-                setupWebsocket(pluginGlobalStoreInstance.dispatch).catch(err => {
-                    console.error('❌ [ReadReceiptPlugin] Failed to setup WebSocket:', err);
                 })
             ]);
 
@@ -99,6 +97,8 @@ export default class ReadReceiptPlugin {
                 if (!pluginGlobalStoreInstance) {
                     console.error("CRITICAL DEBUG: pluginGlobalStoreInstance is null/undefined for RootObserver Provider!");
                 }
+                // Ensure channel reads are loaded on channel switch
+                ensureChannelReadsOnSwitch(mattermostStore);
                 return (
                     <ErrorBoundary>
                         <Provider store={pluginGlobalStoreInstance}>
@@ -111,8 +111,14 @@ export default class ReadReceiptPlugin {
             // Register WebSocket handler
             try {
                 console.log('🔌 [ReadReceiptPlugin] Registering WebSocket handler...');
+                // Register WebSocket event handler for read_receipt (should already exist)
                 registry.registerWebSocketEventHandler(
                     'custom_mattermost-readreceipts_read_receipt',
+                    handleWebSocketEvent(pluginGlobalStoreInstance.dispatch)
+                );
+                // 1️⃣ Register handler for channel_readers events right after the existing one
+                registry.registerWebSocketEventHandler(
+                    'custom_mattermost-readreceipts_channel_readers',
                     handleWebSocketEvent(pluginGlobalStoreInstance.dispatch)
                 );
                 console.log('✅ [ReadReceiptPlugin] WebSocket handler registered');

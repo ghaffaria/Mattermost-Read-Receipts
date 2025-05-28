@@ -27,3 +27,4 @@ mattermost/*
 /server/dist/*
 git-diff-server.txt
 git-diff-web.txt
+*.txt
