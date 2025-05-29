@@ -173,6 +173,9 @@ export const setMattermostStore = async (mattermostStore: Store<any>): Promise<v
     return initializationPromise;
 };
 
+// Export a getter for plugin store for compatibility with ensureChannelReadsOnSwitch
+export const getPluginStore = getStore;
+
 // Type exports
 export type RootState = StoreState;
 export type AppDispatch = typeof store.dispatch;

@@ -30,7 +30,9 @@ export default class ReadReceiptPlugin {
 
             // Initialize Redux store first and wait for it to complete
             await setMattermostStore(mattermostStore);
-            
+            // Ensure channel reads are loaded on channel switch (one-time, after store is ready)
+            ensureChannelReadsOnSwitch(mattermostStore);
+
             // Only proceed if store is properly initialized
             if (!isStoreInitialized()) {
                 throw new Error('Store failed to initialize properly');
@@ -97,8 +99,6 @@ export default class ReadReceiptPlugin {
                 if (!pluginGlobalStoreInstance) {
                     console.error("CRITICAL DEBUG: pluginGlobalStoreInstance is null/undefined for RootObserver Provider!");
                 }
-                // Ensure channel reads are loaded on channel switch
-                ensureChannelReadsOnSwitch(mattermostStore);
                 return (
                     <ErrorBoundary>
                         <Provider store={pluginGlobalStoreInstance}>
@@ -116,9 +116,19 @@ export default class ReadReceiptPlugin {
                     'custom_mattermost-readreceipts_read_receipt',
                     handleWebSocketEvent(pluginGlobalStoreInstance.dispatch)
                 );
+                // Register per-post update WebSocket event handler
+                registry.registerWebSocketEventHandler(
+                    'custom_mattermost-readreceipts_post_read_receipt',
+                    handleWebSocketEvent(pluginGlobalStoreInstance.dispatch)
+                );
                 // 1️⃣ Register handler for channel_readers events right after the existing one
                 registry.registerWebSocketEventHandler(
                     'custom_mattermost-readreceipts_channel_readers',
+                    handleWebSocketEvent(pluginGlobalStoreInstance.dispatch)
+                );
+                // 👇 add this **once**, right after the existing handler registrations
+                registry.registerWebSocketEventHandler(
+                    'custom_read_receipts_update', // ← event name sent by the server
                     handleWebSocketEvent(pluginGlobalStoreInstance.dispatch)
                 );
                 console.log('✅ [ReadReceiptPlugin] WebSocket handler registered');

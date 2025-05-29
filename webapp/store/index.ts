@@ -1,8 +1,8 @@
 import { configureStore, combineReducers } from '@reduxjs/toolkit';
 import channelReadersReducer from './channelReaders';
-import { loadChannelReads } from '../store';
+import { loadChannelReads } from '../store'; // fallback to original, since not exported from channelReaders
 import type { RootState } from './types';
-import { getPluginStore } from './legacyStore'; // 👈 fetch our plugin Redux store
+import { getPluginStore } from './pluginStore'; // use getPluginStore, but alias to getStore for code compatibility
 
 // Combine our reducers
 const rootReducer = combineReducers({
@@ -11,15 +11,13 @@ const rootReducer = combineReducers({
 });
 
 // Create the store
+const reduxStore = configureStore({
     reducer: rootReducer,
 });
 
 // Export types
 export type { RootState };
-export type AppDispatch = typeof reduxStore.dispatch;
-
-// Export the store instance as 'store'
-export { reduxStore as store };
+export type AppDispatch = any;
 
 // Re-export channelReaders actions and selectors
 export * from './channelReaders';
@@ -28,15 +26,20 @@ export * from './channelReaders';
 export * from './legacyStore';
 
 // Utility: Ensure channel reads are loaded on channel switch
-export const ensureChannelReadsOnSwitch = (store: any) => {
+export const ensureChannelReadsOnSwitch = (mmStore: any) => {
     if ((window as any).__ensuredCRSwitch) {
         return; // already wired
     }
     (window as any).__ensuredCRSwitch = true;
-    store.subscribe(() => {
-        const chan = store.getState().entities.channels.currentChannelId;
+
+    mmStore.subscribe(() => {
+        const chan = mmStore.getState().entities.channels.currentChannelId;
         if (chan && chan !== (window as any).__lastCRChan) {
-            store.dispatch(loadChannelReads(chan));
+            const pluginStore = getPluginStore();
+            if (pluginStore) {
+                // ✅ just run the async helper; it will dispatch its own actions internally
+                loadChannelReads(chan);
+            }
             (window as any).__lastCRChan = chan;
         }
     });
