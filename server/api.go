@@ -10,18 +10,8 @@ import (
 	"github.com/arg/mattermost-readreceipts/server/store"
 	"github.com/arg/mattermost-readreceipts/server/types"
 	"github.com/gorilla/mux"
-	"github.com/gorilla/websocket"
 	"github.com/mattermost/mattermost-server/v6/plugin"
 )
-
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		// In production, you might want to check the origin
-		return true
-	},
-}
 
 // Using model.ReadRequest and model.ReadEvent defined in model.go
 
@@ -36,7 +26,6 @@ func (p *Plugin) ServeHTTP(c *plugin.Context, w http.ResponseWriter, r *http.Req
 	router.Handle("/api/v1/debug/ping", http.HandlerFunc(p.HandlePing)).Methods("GET")
 	router.Handle("/api/v1/debug/db", p.MattermostAuthorizationRequired(http.HandlerFunc(p.HandleDBCheck))).Methods("GET")
 	router.Handle("/api/v1/read/channel/{channelID}", p.MattermostAuthorizationRequired(http.HandlerFunc(p.HandleGetReadersSince))).Methods("GET")
-	router.Handle("/api/v1/websocket", p.MattermostAuthorizationRequired(http.HandlerFunc(p.HandleWebSocket))).Methods("GET")
 
 	p.logDebug("[API] Received request",
 		"path", r.URL.Path,
@@ -48,44 +37,6 @@ func (p *Plugin) ServeHTTP(c *plugin.Context, w http.ResponseWriter, r *http.Req
 	)
 
 	router.ServeHTTP(w, r)
-}
-
-// HandleWebSocket handles WebSocket connections
-func (p *Plugin) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
-	userID := r.Header.Get("Mattermost-User-Id")
-	if userID == "" {
-		userID = r.Header.Get("Mattermost-User-ID")
-	}
-
-	// Upgrade the HTTP connection to a WebSocket connection
-	c, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		p.logError("[WebSocket] Failed to upgrade connection", "error", err.Error())
-		return
-	}
-	defer c.Close()
-
-	p.logDebug("[WebSocket] Client connected", "user_id", userID)
-
-	// Keep the connection alive
-	for {
-		messageType, _, err := c.ReadMessage()
-		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				p.logError("[WebSocket] Read error", "error", err.Error())
-			} else {
-				p.logDebug("[WebSocket] Connection closed by client", "user_id", userID)
-			}
-			break
-		}
-
-		if messageType == websocket.PingMessage {
-			if err := c.WriteMessage(websocket.PongMessage, nil); err != nil {
-				p.logError("[WebSocket] Failed to send pong", "error", err.Error())
-				break
-			}
-		}
-	}
 }
 
 func (p *Plugin) MattermostAuthorizationRequired(next http.Handler) http.Handler {

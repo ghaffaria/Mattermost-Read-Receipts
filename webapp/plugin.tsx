@@ -110,30 +110,23 @@ export default class ReadReceiptPlugin {
 
             // Register WebSocket handler
             try {
-                console.log('🔌 [ReadReceiptPlugin] Registering WebSocket handler...');
-                // Register WebSocket event handler for read_receipt (should already exist)
+                console.log('🔌 [ReadReceiptPlugin] Registering WebSocket handlers...');
+                
+                // Register handler for read receipt events
                 registry.registerWebSocketEventHandler(
                     'custom_mattermost-readreceipts_read_receipt',
                     handleWebSocketEvent(pluginGlobalStoreInstance.dispatch)
                 );
-                // Register per-post update WebSocket event handler
-                registry.registerWebSocketEventHandler(
-                    'custom_mattermost-readreceipts_post_read_receipt',
-                    handleWebSocketEvent(pluginGlobalStoreInstance.dispatch)
-                );
-                // 1️⃣ Register handler for channel_readers events right after the existing one
+                
+                // Register handler for channel readers events
                 registry.registerWebSocketEventHandler(
                     'custom_mattermost-readreceipts_channel_readers',
                     handleWebSocketEvent(pluginGlobalStoreInstance.dispatch)
                 );
-                // 👇 add this **once**, right after the existing handler registrations
-                registry.registerWebSocketEventHandler(
-                    'custom_read_receipts_update', // ← event name sent by the server
-                    handleWebSocketEvent(pluginGlobalStoreInstance.dispatch)
-                );
-                console.log('✅ [ReadReceiptPlugin] WebSocket handler registered');
+                
+                console.log('✅ [ReadReceiptPlugin] WebSocket handlers registered');
             } catch (error) {
-                console.error('❌ [ReadReceiptPlugin] Failed to register WebSocket handler:', error);
+                console.error('❌ [ReadReceiptPlugin] Failed to register WebSocket handlers:', error);
             }
 
             console.log('✅ [ReadReceiptPlugin] Initialization complete');
