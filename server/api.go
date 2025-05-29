@@ -246,6 +246,33 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 	// Broadcast receipt via WebSocket
 	p.logDebug("Attempting to publish WebSocket event", "event", WebSocketEventReadReceipt, "channelID", channelID, "userID", userID, "messageID", req.MessageID)
 	p.PublishReadReceipt(channelID, req.MessageID, userID, now)
+	// Get all users who have read this specific message to broadcast channel readers update
+	channelEvents, channelErr := p.store.GetByChannel(channelID, "")
+	if channelErr != nil {
+		p.logError("[API] Failed to get channel events", "channel_id", channelID, "error", channelErr.Error())
+		// Don't fail the request, just log the error
+	} else {
+		p.logError("[API] DEBUG: Retrieved channel events", "channel_id", channelID, "event_count", len(channelEvents), "target_message_id", req.MessageID)
+
+		// Filter events for this specific message and extract user IDs
+		userIDMap := make(map[string]bool)
+		for _, event := range channelEvents {
+			p.logError("[API] DEBUG: Checking event", "event_message_id", event.MessageID, "target_message_id", req.MessageID, "matches", event.MessageID == req.MessageID)
+			if event.MessageID == req.MessageID {
+				userIDMap[event.UserID] = true
+				p.logError("[API] DEBUG: Added user to readers", "user_id", event.UserID)
+			}
+		}
+
+		// Convert map to slice
+		userIDs := make([]string, 0, len(userIDMap))
+		for userID := range userIDMap {
+			userIDs = append(userIDs, userID)
+		}
+
+		p.logError("[API] DEBUG: Broadcasting channel readers update", "channelID", channelID, "lastPostID", req.MessageID, "userIDs", userIDs, "reader_count", len(userIDs))
+		p.PublishChannelReadersUpdate(channelID, req.MessageID, userIDs)
+	}
 
 	// Write success response
 	w.Header().Set("Content-Type", "application/json")

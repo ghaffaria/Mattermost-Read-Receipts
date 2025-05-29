@@ -26,10 +26,12 @@ func (s *PostgresStore) Initialize() error {
 		message_id TEXT NOT NULL,
 		user_id TEXT NOT NULL,
 		timestamp BIGINT NOT NULL,
+		channel_id TEXT,
 		PRIMARY KEY (message_id, user_id)
 	);
 	CREATE INDEX IF NOT EXISTS idx_read_events_message_id ON read_events(message_id);
 	CREATE INDEX IF NOT EXISTS idx_read_events_user_id ON read_events(user_id);
+	CREATE INDEX IF NOT EXISTS idx_read_events_channel_id ON read_events(channel_id);
 	`
 	_, err := s.db.Exec(query)
 	return err
@@ -37,27 +39,25 @@ func (s *PostgresStore) Initialize() error {
 
 func (s *PostgresStore) Upsert(event ReadEvent) error {
 	query := `
-		INSERT INTO read_events (message_id, user_id, timestamp)
-		VALUES ($1, $2, $3)
+		INSERT INTO read_events (message_id, user_id, timestamp, channel_id)
+		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (message_id, user_id)
-		DO UPDATE SET timestamp = EXCLUDED.timestamp
+		DO UPDATE SET timestamp = EXCLUDED.timestamp, channel_id = EXCLUDED.channel_id
 	`
-	_, err := s.db.Exec(query, event.MessageID, event.UserID, event.Timestamp)
+	_, err := s.db.Exec(query, event.MessageID, event.UserID, event.Timestamp, event.ChannelID)
 	return err
 }
 
 func (s *PostgresStore) GetByChannel(channelID, excludeUserID string) ([]ReadEvent, error) {
 	query := `
-		SELECT message_id, user_id, timestamp
+		SELECT message_id, user_id, timestamp, channel_id
 		FROM read_events re
-		WHERE message_id LIKE $1
-		AND user_id != $2
+		WHERE channel_id = $1
+		AND ($2 = '' OR user_id != $2)
 		ORDER BY timestamp DESC
 	`
-	// Use channel ID prefix to match messages in the channel
-	channelPrefix := channelID + ":%"
 
-	rows, err := s.db.Query(query, channelPrefix, excludeUserID)
+	rows, err := s.db.Query(query, channelID, excludeUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +66,7 @@ func (s *PostgresStore) GetByChannel(channelID, excludeUserID string) ([]ReadEve
 	var events []ReadEvent
 	for rows.Next() {
 		var event ReadEvent
-		if err := rows.Scan(&event.MessageID, &event.UserID, &event.Timestamp); err != nil {
+		if err := rows.Scan(&event.MessageID, &event.UserID, &event.Timestamp, &event.ChannelID); err != nil {
 			return nil, err
 		}
 		events = append(events, event)
@@ -165,7 +165,8 @@ func (s *PostgresStore) UpsertTx(tx Tx, event ReadEvent) error {
 		INSERT INTO read_events (message_id, user_id, channel_id, timestamp)
 		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (message_id, user_id) DO UPDATE SET
-		timestamp = GREATEST(read_events.timestamp, EXCLUDED.timestamp)
+		timestamp = GREATEST(read_events.timestamp, EXCLUDED.timestamp),
+		channel_id = EXCLUDED.channel_id
 	`
 	_, err := sqlTx.Exec(query, event.MessageID, event.UserID, event.ChannelID, event.Timestamp)
 	return err
