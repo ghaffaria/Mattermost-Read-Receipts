@@ -85,22 +85,54 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
 
         console.log('DEBUG: [PostReceipt] seenBy:', seenBy);
 
-        // Render nothing if the message is not seen by the current user and it's not their own message
-        if (!seenBy && !isOwnMessage) {
-            console.log('DEBUG: [PostReceipt] Message not seen by user and not own message, not rendering receipt.');
-            return null;
+        // Read receipts should ONLY be shown on the sender's own messages
+        // If this is not the user's own message, only render the VisibilityTracker (if not seen)
+        if (!isOwnMessage) {
+            console.log('DEBUG: [PostReceipt] Not own message, only rendering VisibilityTracker if not seen');
+            if (!seenBy) {
+                return (
+                    <VisibilityTracker 
+                        messageId={messageId} 
+                        postAuthorId={post.user_id}
+                        channelId={post.channel_id}
+                        key={`tracker-${messageId}`}
+                    />
+                );
+            }
+            return null; // Don't show read receipts for received messages
         }
 
-        // Filter out current user from display list if this is their message
-        const seenByOthers = isOwnMessage ? readerIds.filter(id => id !== currentUserId) : readerIds;
+        // From here on, we know it's the user's own message
+        // Filter out current user from display list (they shouldn't see themselves in "Seen by")
+        const seenByOthers = readerIds.filter(id => id !== currentUserId);
 
-        // Get display names for readers
+        // Get display names for readers using Mattermost's user profiles
         const seenByOthersDisplay = seenByOthers.map(userId => {
-            // You may want to implement a getUserDisplayName util or use userId directly
-            return userId;
-        });
+            // Access Mattermost's user profiles directly from the global window store
+            try {
+                const mattermostStore = (window as any).store;
+                if (mattermostStore) {
+                    const user = mattermostStore.getState()?.entities?.users?.profiles?.[userId];
+                    if (user) {
+                        // Priority: nickname > first+last name > username > fallback
+                        const displayName = user.nickname || 
+                                          `${user.first_name || ''} ${user.last_name || ''}`.trim() || 
+                                          user.username ||
+                                          `User ${userId.substring(0, 8)}`;
+                        console.log('👤 [PostReceipt] User display name:', { userId, displayName, user });
+                        return displayName;
+                    }
+                }
+                console.warn('⚠️ [PostReceipt] User profile not found in Mattermost store:', userId);
+                return `User ${userId.substring(0, 8)}`; // Fallback with shortened ID
+            } catch (error) {
+                console.error('❌ [PostReceipt] Error getting user display name:', error);
+                return `User ${userId.substring(0, 8)}`; // Fallback with shortened ID
+            }
+        }).filter(name => name); // Filter out any empty names
 
         // If the message is seen or it's the user's own message, render the receipt
+        // At this point we know it's the user's own message (due to early returns above)
         return (
             <div 
                 className="post-receipt-container" 
@@ -109,15 +141,7 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
                 data-is-own-message={isOwnMessage}
                 data-author-id={post.user_id}
             >
-                {/* Never include VisibilityTracker for own messages */}
-                {!isOwnMessage && (
-                    <VisibilityTracker 
-                        messageId={messageId} 
-                        postAuthorId={post.user_id}
-                        channelId={post.channel_id}
-                        key={`tracker-${messageId}`}
-                    />
-                )}
+                {/* Only show "Seen by" if others have read the message */}
                 {seenByOthers.length > 0 && (
                     <div 
                         className="post-receipt" 
