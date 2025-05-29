@@ -37,16 +37,13 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
 
         const messageId = post.id;
         const readerIds = useSelector((state: RootState) => {
-            console.log('DEBUG: [PostReceipt] State in useSelector for post:', post.id, JSON.stringify(state));
-            if (!state) {
-                console.error('CRITICAL DEBUG: [PostReceipt] state is null/undefined inside useSelector for post:', post.id);
-                return [];
+            // 1️⃣ try the expected nested shape
+            let readers = selectReaders(state, post.channel_id, messageId);
+            // 2️⃣ fallback to flat {postId: [...] } shape (seen in latest logs)
+            if (readers.length === 0 && (state as any).channelReaders?.[messageId]) {
+                readers = (state as any).channelReaders[messageId];
             }
-            if (!state.channelReaders) {
-                console.warn('⚠️ [PostReceipt] Redux state.channelReaders is missing for post:', post.id, 'State keys:', Object.keys(state));
-                return [];
-            }
-            return selectReaders(state, post.channel_id, messageId);
+            return readers;
         });
         console.log('DEBUG: [PostReceipt] readerIds:', readerIds);
         console.log('DEBUG: [PostReceipt] readerIds after useSelector:', readerIds, 'for post:', messageId);
