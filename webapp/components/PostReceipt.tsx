@@ -1,7 +1,6 @@
 // webapp/components/PostReceipt.tsx
 import React, { FC, ReactElement } from 'react';
 import { useSelector, useStore } from 'react-redux';
-import { ensureStoreInitialized } from '../store/pluginStore';
 import VisibilityTracker from './VisibilityTracker';
 import { Post } from '../types/mattermost-webapp';
 import { RootState } from '../store/types';
@@ -13,17 +12,10 @@ interface PostReceiptProps {
 }
 
 const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
-    const contextStore = useStore();
-    console.log('DEBUG: useStore() in PostReceipt context:', contextStore);
+    const contextStore = useStore(); // uses the Provider injected by RootObserver
+    console.log('DEBUG: PostReceipt store instance:', contextStore);
 
-    console.log('DEBUG: PostReceipt rendering, calling ensureStoreInitialized...');
-    try {
-        ensureStoreInitialized();
-        console.log('DEBUG: ensureStoreInitialized succeeded.');
-    } catch (e) {
-        console.error('DEBUG: ensureStoreInitialized failed:', e);
-    }
-
+    console.log('DEBUG: PostReceipt rendering...');
     try {
         // Early returns for invalid posts
         if (!post?.id || !post?.user_id || !post?.channel_id) {
