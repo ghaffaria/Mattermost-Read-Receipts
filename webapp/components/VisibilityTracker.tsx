@@ -102,7 +102,8 @@ const VisibilityTracker: FC<VisibilityTrackerProps> = ({
                     clearInterval(timerRef.current);
                     timerRef.current = null;
                 }
-                updateReadReceipts(messageId, currentUserId);
+                // VisibilityTracker sends user-initiated read events, so this is a real-time update
+                updateReadReceipts(messageId, currentUserId, true);
                 onVisible?.(messageId);
             } else {
                 throw new Error(`Server returned ${response.status}`);

@@ -158,16 +158,14 @@ func (s *MySQLStore) GetReadersSince(channelID string, sinceMs int64, excludeUse
 // GetByChannel retrieves read receipt events for a channel, excluding a specific user.
 func (s *MySQLStore) GetByChannel(channelID, excludeUserID string) ([]ReadEvent, error) {
 	query := `
-		SELECT message_id, user_id, timestamp
+		SELECT message_id, user_id, timestamp, channel_id
 		FROM read_events
-		WHERE message_id LIKE ?
-		AND user_id != ?
+		WHERE channel_id = ?
+		AND (? = '' OR user_id != ?)
 		ORDER BY timestamp DESC
 	`
-	// Use channel ID prefix to match messages in the channel
-	channelPrefix := channelID + ":%"
 
-	rows, err := s.db.Query(query, channelPrefix, excludeUserID)
+	rows, err := s.db.Query(query, channelID, excludeUserID, excludeUserID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query read events: %w", err)
 	}
@@ -176,7 +174,7 @@ func (s *MySQLStore) GetByChannel(channelID, excludeUserID string) ([]ReadEvent,
 	var events []ReadEvent
 	for rows.Next() {
 		var event ReadEvent
-		if err := rows.Scan(&event.MessageID, &event.UserID, &event.Timestamp); err != nil {
+		if err := rows.Scan(&event.MessageID, &event.UserID, &event.Timestamp, &event.ChannelID); err != nil {
 			return nil, fmt.Errorf("failed to scan read event: %w", err)
 		}
 		events = append(events, event)

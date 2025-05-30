@@ -138,6 +138,28 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 			"message_id", req.MessageID)
 	}
 
+	// Get channel info for enhanced debugging
+	channel, channelErr := p.API.GetChannel(channelID)
+	if channelErr != nil {
+		p.logError("[API] CRITICAL - Failed to get channel info", "channelID", channelID, "error", channelErr.Error())
+	} else {
+		p.logError("[API] CRITICAL - Channel details", "channelID", channelID, "channelType", channel.Type, "channelName", channel.Name, "teamID", channel.TeamId, "isDM", channel.Type == "D")
+
+		// For DM channels, get the members
+		if channel.Type == "D" {
+			members, membersErr := p.API.GetChannelMembers(channelID, 0, 10)
+			if membersErr != nil {
+				p.logError("[API] CRITICAL - Failed to get DM channel members", "channelID", channelID, "error", membersErr.Error())
+			} else {
+				memberIDs := make([]string, len(members))
+				for i, member := range members {
+					memberIDs[i] = member.UserId
+				}
+				p.logError("[API] CRITICAL - DM channel members", "channelID", channelID, "memberCount", len(members), "memberIDs", memberIDs, "readerUserID", userID)
+			}
+		}
+	}
+
 	// Store the read receipt
 	now := time.Now().UnixMilli() // Use milliseconds instead of seconds
 	event := store.ReadEvent{
@@ -195,12 +217,18 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Broadcast receipt via WebSocket
-	p.logDebug("Attempting to publish WebSocket event", "event", WebSocketEventReadReceipt, "channelID", channelID, "userID", userID, "messageID", req.MessageID)
+	p.logDebug("🚀 [API] About to publish WebSocket events", "event", WebSocketEventReadReceipt, "channelID", channelID, "userID", userID, "messageID", req.MessageID)
+	p.logError("🎯 [API] CRITICAL - Publishing read receipt WebSocket event", "channelID", channelID, "userID", userID, "messageID", req.MessageID, "timestamp", now)
 	p.PublishReadReceipt(channelID, req.MessageID, userID, now)
+	p.logError("✅ [API] CRITICAL - Published read receipt WebSocket event successfully", "channelID", channelID, "userID", userID, "messageID", req.MessageID)
+	p.logDebug("✅ [API] Published read receipt WebSocket event")
+
 	// Get all users who have read this specific message to broadcast channel readers update
-	channelEvents, channelErr := p.store.GetByChannel(channelID, "")
-	if channelErr != nil {
-		p.logError("[API] Failed to get channel events", "channel_id", channelID, "error", channelErr.Error())
+	var channelEvents []store.ReadEvent
+	var eventsErr error
+	channelEvents, eventsErr = p.store.GetByChannel(channelID, "")
+	if eventsErr != nil {
+		p.logError("[API] Failed to get channel events", "channel_id", channelID, "error", eventsErr.Error())
 		// Don't fail the request, just log the error
 	} else {
 		p.logError("[API] DEBUG: Retrieved channel events", "channel_id", channelID, "event_count", len(channelEvents), "target_message_id", req.MessageID)
@@ -221,8 +249,9 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 			userIDs = append(userIDs, userID)
 		}
 
-		p.logError("[API] DEBUG: Broadcasting channel readers update", "channelID", channelID, "lastPostID", req.MessageID, "userIDs", userIDs, "reader_count", len(userIDs))
+		p.logDebug("🚀 [API] About to publish channel readers update", "channelID", channelID, "lastPostID", req.MessageID, "userIDs", userIDs, "reader_count", len(userIDs))
 		p.PublishChannelReadersUpdate(channelID, req.MessageID, userIDs)
+		p.logDebug("✅ [API] Published channel readers WebSocket event")
 	}
 
 	// Write success response

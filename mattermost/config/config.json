@@ -587,7 +587,7 @@
                 "enablereadreceipts": true,
                 "loglevel": "info",
                 "retentiondays": 30,
-                "visibilitythresholdms": 100
+                "visibilitythresholdms": 2000
             },
             "playbooks": {
                 "BotUserID": "akb6tzsezbr5xyg3bapjon5fhw"

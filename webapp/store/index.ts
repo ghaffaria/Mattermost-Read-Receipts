@@ -37,8 +37,8 @@ export const ensureChannelReadsOnSwitch = (mmStore: any) => {
         if (chan && chan !== (window as any).__lastCRChan) {
             const pluginStore = getPluginStore();
             if (pluginStore) {
-                // ✅ just run the async helper; it will dispatch its own actions internally
-                loadChannelReads(chan);
+                // ✅ Channel switching should NOT trigger "Seen by" UI updates (isInitialLoad: true)
+                loadChannelReads(chan, true);
             }
             (window as any).__lastCRChan = chan;
         }

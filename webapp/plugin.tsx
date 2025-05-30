@@ -3,7 +3,7 @@ import React from 'react';
 // @ts-ignore
 import {PluginRegistry} from 'mattermost-webapp/plugins/registry';
 import PostReceipt from './components/PostReceipt';
-import {handleWebSocketEvent} from './websocket';
+import {handleWebSocketEvent, initializeDirectWebSocketInterception} from './websocket';
 import {loadInitialReceipts, fetchPluginConfig, loadChannelReads} from './store';
 import { ensureChannelReadsOnSwitch } from './store/index';
 import { store as pluginGlobalStoreInstance, setMattermostStore, isStoreInitialized } from './store/pluginStore';
@@ -21,6 +21,18 @@ export default class ReadReceiptPlugin {
     async initialize(registry: PluginRegistry, mattermostStore: any) {
         console.log('🔌 [ReadReceiptPlugin] Initializing...');
         console.log('DEBUG: Top-level pluginGlobalStoreInstance:', pluginGlobalStoreInstance);
+        
+        // Initialize safe WebSocket interception AFTER Mattermost initializes
+        setTimeout(() => {
+            try {
+                console.log('🔧 [ReadReceiptPlugin] Initializing safe WebSocket interception...');
+                initializeDirectWebSocketInterception();
+                console.log('✅ [ReadReceiptPlugin] Safe WebSocket interception initialized');
+            } catch (error) {
+                console.error('❌ [ReadReceiptPlugin] Failed to initialize WebSocket interception:', error);
+            }
+        }, 2000); // Wait 2 seconds for Mattermost to fully initialize
+        
         try {
             console.log('DEBUG: Calling setMattermostStore with:', mattermostStore);
             if (!mattermostStore?.getState) {
@@ -52,16 +64,51 @@ export default class ReadReceiptPlugin {
 
             // Pre-load receipts for current channel if available
             if (currentChannelId) {
-                console.log('📥 [ReadReceiptPlugin] Pre-loading receipts for channel:', currentChannelId);
+                console.log('📥 [ReadReceiptPlugin] Pre-loading receipts for channel (initial load):', currentChannelId);
                 await Promise.all([
-                    loadInitialReceipts(currentChannelId, pluginGlobalStoreInstance.dispatch).catch(err => {
+                    loadInitialReceipts(currentChannelId, pluginGlobalStoreInstance.dispatch, true).catch(err => {
                         console.error('❌ [ReadReceiptPlugin] Failed to load receipts:', err);
                     }),
-                    loadChannelReads(currentChannelId).catch(err => {
+                    loadChannelReads(currentChannelId, true).catch(err => {
                         console.error('❌ [ReadReceiptPlugin] Failed to load channel reads:', err);
                     })
                 ]);
-                console.log('✅ [ReadReceiptPlugin] Pre-loaded receipts successfully');
+                console.log('✅ [ReadReceiptPlugin] Pre-loaded receipts successfully (no UI updates triggered)');
+            }
+
+            // Debug: Hook into Mattermost's WebSocket system directly
+            try {
+                console.log('🔌 [ReadReceiptPlugin] Setting up direct WebSocket debugging...');
+                
+                // Try to access Mattermost's WebSocket client directly
+                const mmStore = mattermostStore.getState();
+                if (mmStore?.websocket) {
+                    console.log('🌐 [ReadReceiptPlugin] Found Mattermost WebSocket in store:', mmStore.websocket);
+                }
+                
+                // Hook into window.mm if available
+                if (typeof window !== 'undefined' && (window as any).mm) {
+                    console.log('🌐 [ReadReceiptPlugin] Found window.mm:', (window as any).mm);
+                    
+                    // Try to access WebSocket client
+                    const mmClient = (window as any).mm.Client4 || (window as any).mm.client;
+                    if (mmClient) {
+                        console.log('🌐 [ReadReceiptPlugin] Found MM client:', mmClient);
+                    }
+                }
+                
+                // Try accessing the WebSocket client through global variables
+                if (typeof window !== 'undefined') {
+                    const globals = ['Client4', 'mmClient', 'WebSocketClient'];
+                    globals.forEach(globalName => {
+                        if ((window as any)[globalName]) {
+                            console.log(`🌐 [ReadReceiptPlugin] Found global ${globalName}:`, (window as any)[globalName]);
+                        }
+                    });
+                }
+                
+            } catch (error) {
+                console.error('❌ [ReadReceiptPlugin] Error in WebSocket debugging setup:', error);
             }
 
             // Register post component with error boundary
@@ -108,21 +155,76 @@ export default class ReadReceiptPlugin {
                 );
             });
 
-            // Register WebSocket handler
+            // Register WebSocket handlers
             try {
                 console.log('🔌 [ReadReceiptPlugin] Registering WebSocket handlers...');
                 
-                // Register handler for read receipt events
-                registry.registerWebSocketEventHandler(
-                    'custom_mattermost-readreceipts_read_receipt',
-                    handleWebSocketEvent(pluginGlobalStoreInstance.dispatch)
-                );
+                const wsHandler = handleWebSocketEvent(pluginGlobalStoreInstance.dispatch);
                 
-                // Register handler for channel readers events
-                registry.registerWebSocketEventHandler(
-                    'custom_mattermost-readreceipts_channel_readers',
-                    handleWebSocketEvent(pluginGlobalStoreInstance.dispatch)
-                );
+                // Create a debug handler to catch ALL WebSocket events
+                const debugHandler = (event: any) => {
+                    console.log('🌐 [ReadReceiptPlugin] Registry WebSocket event received:', {
+                        eventType: event?.event || 'unknown',
+                        hasData: !!event?.data,
+                        fullEvent: event,
+                        timestamp: new Date().toISOString()
+                    });
+                    
+                    // Call the original handler too
+                    return wsHandler(event);
+                };
+                
+                // Test: Register a catch-all handler to see if ANY WebSocket events are received
+                if (typeof (registry as any).registerWebSocketEventHandler === 'function') {
+                    console.log('✅ [ReadReceiptPlugin] WebSocket registration function exists');
+                    
+                    // Register catch-all handlers for common events to test
+                    const testEvents = [
+                        'user_typing',
+                        'posted',
+                        'post_updated',
+                        'channel_viewed',
+                        'preference_changed'
+                    ];
+                    
+                    testEvents.forEach(eventType => {
+                        try {
+                            (registry as any).registerWebSocketEventHandler(eventType, (event: any) => {
+                                console.log(`🔬 [ReadReceiptPlugin] TEST: Received ${eventType} event:`, event);
+                            });
+                            console.log(`✅ [ReadReceiptPlugin] Registered test handler for ${eventType}`);
+                        } catch (error) {
+                            console.warn(`⚠️ [ReadReceiptPlugin] Failed to register test handler for ${eventType}:`, error);
+                        }
+                    });
+                    
+                    // Register handler for read receipt events
+                    (registry as any).registerWebSocketEventHandler(
+                        'custom_mattermost-readreceipts_read_receipt',
+                        debugHandler
+                    );
+                    console.log('✅ [ReadReceiptPlugin] Registered read receipt handler');
+                    
+                    // Register handler for channel readers events
+                    (registry as any).registerWebSocketEventHandler(
+                        'custom_mattermost-readreceipts_channel_readers',
+                        debugHandler
+                    );
+                    console.log('✅ [ReadReceiptPlugin] Registered channel readers handler');
+                    
+                    // Test: Register a catch-all handler for debugging
+                    if (typeof window !== 'undefined' && window.WebSocket) {
+                        console.log('🌐 [ReadReceiptPlugin] Setting up global WebSocket debugging...');
+                        const originalSend = WebSocket.prototype.send;
+                        WebSocket.prototype.send = function(data) {
+                            console.log('🌐 [WebSocket] Outgoing:', data);
+                            return originalSend.call(this, data);
+                        };
+                    }
+                } else {
+                    console.error('❌ [ReadReceiptPlugin] registerWebSocketEventHandler function not found on registry');
+                    console.log('🔍 [ReadReceiptPlugin] Available registry methods:', Object.keys(registry));
+                }
                 
                 console.log('✅ [ReadReceiptPlugin] WebSocket handlers registered');
             } catch (error) {
