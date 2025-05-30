@@ -3,6 +3,7 @@ package store
 
 import (
 	"database/sql"
+	"strings"
 
 	"github.com/arg/mattermost-readreceipts/server/types"
 )
@@ -56,4 +57,23 @@ func NewBaseStore(db *sql.DB) BaseStore {
 // BeginTx starts a new database transaction
 func (s *BaseStore) BeginTx() (Tx, error) {
 	return s.db.Begin()
+}
+
+// IsUniqueViolation checks for duplicate-key errors for PostgreSQL and MySQL (single implementation)
+func IsUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	// PostgreSQL: pq: duplicate key value violates unique constraint
+	if strings.Contains(errStr, "duplicate key value") ||
+		strings.Contains(errStr, "violates unique constraint") {
+		return true
+	}
+	// MySQL: Error 1062: Duplicate entry '...' for key '...'
+	if strings.Contains(errStr, "Error 1062") ||
+		strings.Contains(errStr, "Duplicate entry") {
+		return true
+	}
+	return false
 }

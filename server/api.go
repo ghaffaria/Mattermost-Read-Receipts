@@ -10,6 +10,7 @@ import (
 	"github.com/arg/mattermost-readreceipts/server/store"
 	"github.com/arg/mattermost-readreceipts/server/types"
 	"github.com/gorilla/mux"
+	"github.com/mattermost/mattermost-server/v6/model"
 	"github.com/mattermost/mattermost-server/v6/plugin"
 )
 
@@ -216,12 +217,25 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Broadcast receipt via WebSocket
-	p.logDebug("🚀 [API] About to publish WebSocket events", "event", WebSocketEventReadReceipt, "channelID", channelID, "userID", userID, "messageID", req.MessageID)
-	p.logError("🎯 [API] CRITICAL - Publishing read receipt WebSocket event", "channelID", channelID, "userID", userID, "messageID", req.MessageID, "timestamp", now)
-	p.PublishReadReceipt(channelID, req.MessageID, userID, now)
-	p.logError("✅ [API] CRITICAL - Published read receipt WebSocket event successfully", "channelID", channelID, "userID", userID, "messageID", req.MessageID)
-	p.logDebug("✅ [API] Published read receipt WebSocket event")
+	// Broadcast receipt via WebSocket to the post's author (not the reader)
+	authorID := post.UserId
+	p.logDebug("[RR] WS payload (to author)", "payload", map[string]interface{}{
+		"MessageID": post.Id,
+		"UserID":    userID,
+		"ChannelID": post.ChannelId,
+		"AuthorID":  authorID,
+	})
+	p.API.PublishWebSocketEvent(
+		WebSocketEventReadReceipt,
+		map[string]interface{}{
+			"MessageID": post.Id,
+			"UserID":    userID,
+			"ChannelID": post.ChannelId,
+		},
+		&model.WebsocketBroadcast{
+			UserId: authorID, // Only send to the author
+		},
+	)
 
 	// Get all users who have read this specific message to broadcast channel readers update
 	var channelEvents []store.ReadEvent
@@ -234,6 +248,7 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 		p.logError("[API] DEBUG: Retrieved channel events", "channel_id", channelID, "event_count", len(channelEvents), "target_message_id", req.MessageID)
 
 		// Filter events for this specific message and extract user IDs
+		var userIDs []string
 		userIDMap := make(map[string]bool)
 		for _, event := range channelEvents {
 			p.logError("[API] DEBUG: Checking event", "event_message_id", event.MessageID, "target_message_id", req.MessageID, "matches", event.MessageID == req.MessageID)
@@ -242,15 +257,24 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 				p.logError("[API] DEBUG: Added user to readers", "user_id", event.UserID)
 			}
 		}
-
-		// Convert map to slice
-		userIDs := make([]string, 0, len(userIDMap))
+		userIDs = make([]string, 0, len(userIDMap))
 		for userID := range userIDMap {
 			userIDs = append(userIDs, userID)
 		}
 
 		p.logDebug("🚀 [API] About to publish channel readers update", "channelID", channelID, "lastPostID", req.MessageID, "userIDs", userIDs, "reader_count", len(userIDs))
-		p.PublishChannelReadersUpdate(channelID, req.MessageID, userIDs)
+		p.API.PublishWebSocketEvent(
+			"custom_mattermost-readreceipts_channel_readers",
+			map[string]interface{}{
+				"ChannelID":  post.ChannelId,
+				"LastPostID": post.Id,
+				"UserIDs":    userIDs,
+			},
+			&model.WebsocketBroadcast{
+				ChannelId: post.ChannelId,
+				OmitUsers: map[string]bool{userID: true},
+			},
+		)
 		p.logDebug("✅ [API] Published channel readers WebSocket event")
 	}
 
@@ -261,6 +285,41 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 		"status": "ok",
 		"event":  event,
 	})
+}
+
+// HandleSimpleRead – GET /read/simple?post_id=… (helper for tests)
+func (p *Plugin) HandleSimpleRead(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("Mattermost-User-Id")
+	if userID == "" {
+		http.Error(w, "unauth", http.StatusUnauthorized)
+		return
+	}
+	postID := r.URL.Query().Get("post_id")
+	if postID == "" {
+		http.Error(w, "post_id required", 400)
+		return
+	}
+
+	post, err := p.API.GetPost(postID)
+	if err != nil {
+		http.Error(w, "not found", 404)
+		return
+	}
+	_ = p.readReceiptStore.MarkPostAsRead(post.Id, userID)
+
+	// read_receipt event
+	p.API.PublishWebSocketEvent(EventReadReceipt, map[string]interface{}{
+		"MessageID": post.Id,
+		"UserID":    userID,
+		"ChannelID": post.ChannelId,
+	}, &model.WebsocketBroadcast{ChannelId: post.ChannelId, OmitUsers: map[string]bool{userID: true}})
+
+	// channel_readers aggregate
+	p.API.PublishWebSocketEvent(EventChannelReaders, map[string]interface{}{
+		"ChannelID":  post.ChannelId,
+		"LastPostID": post.Id,
+		"UserIDs":    []string{userID},
+	}, &model.WebsocketBroadcast{ChannelId: post.ChannelId, OmitUsers: map[string]bool{userID: true}})
 }
 
 func (p *Plugin) HandleGetReceipts(w http.ResponseWriter, r *http.Request) {

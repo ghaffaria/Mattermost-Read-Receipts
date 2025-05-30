@@ -7,17 +7,20 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/arg/mattermost-readreceipts/server/store"
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
+	"github.com/mattermost/mattermost-server/v6/model"
 	"github.com/mattermost/mattermost-server/v6/plugin"
 	"github.com/pkg/errors"
-
-	"github.com/arg/mattermost-readreceipts/server/store"
 )
 
 type Plugin struct {
 	plugin.MattermostPlugin
-	store  store.ReceiptStore
+
+	store            store.ReceiptStore // backing DB store
+	readReceiptStore *ReadReceiptStore  // helper wrapper
+
 	conf   *Configuration
 	stopCh chan struct{}
 }
@@ -111,7 +114,9 @@ func (p *Plugin) OnActivate() error {
 		}
 	}
 
-	p.logInfo("[Plugin] Read receipts plugin activated successfully")
+	// Initialise helper-store exactly once
+	p.readReceiptStore = &ReadReceiptStore{Store: p.store}
+	p.logInfo("[Plugin] Read-Receipts plugin activated")
 	return nil
 }
 
@@ -180,4 +185,28 @@ func (p *Plugin) logInfo(msg string, kv ...interface{}) {
 
 func (p *Plugin) logError(msg string, kv ...interface{}) {
 	p.API.LogError(msg, kv...)
+}
+
+// WebSocket event names (single source of truth)
+const (
+	EventReadReceipt    = "custom_mattermost-readreceipts_read_receipt"
+	EventChannelReaders = "custom_mattermost-readreceipts_channel_readers"
+)
+
+// MessageHasBeenPosted marks the sender as having read their own post and
+// notifies everyone else in the channel/DM.
+func (p *Plugin) MessageHasBeenPosted(_ *plugin.Context, post *model.Post) {
+	if post == nil {
+		return
+	}
+
+	// 1) Persist
+	_ = p.readReceiptStore.MarkPostAsRead(post.Id, post.UserId)
+
+	// 2) Broadcast channel-level update (single-element array)
+	p.API.PublishWebSocketEvent(EventChannelReaders, map[string]interface{}{
+		"ChannelID":  post.ChannelId,
+		"LastPostID": post.Id,
+		"UserIDs":    []string{post.UserId},
+	}, &model.WebsocketBroadcast{ChannelId: post.ChannelId})
 }

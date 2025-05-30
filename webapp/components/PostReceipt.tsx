@@ -5,6 +5,7 @@ import VisibilityTracker from './VisibilityTracker';
 import { Post } from '../types/mattermost-webapp';
 import { RootState } from '../store/types';
 import { selectReaders } from '../store/channelReaders';
+import { loadInitialReceipts } from '../store';
 import styles from './PostReceipt.module.css';
 
 interface PostReceiptProps {
@@ -37,7 +38,7 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
             }
             return readers;
         });
-        console.log('DEBUG: [PostReceipt] readerIds:', readerIds);
+        console.log(`[PostReceipt:${messageId}] readerIds:`, readerIds);
         console.log('DEBUG: [PostReceipt] readerIds after useSelector:', readerIds, 'for post:', messageId);
 
         // Get current user ID
