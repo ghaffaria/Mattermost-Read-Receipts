@@ -1,11 +1,12 @@
 // webapp/components/PostReceipt.tsx
-import React, { FC, ReactElement } from 'react';
+import React, { FC, ReactElement, useRef, useEffect } from 'react';
 import { useSelector, useStore } from 'react-redux';
 import VisibilityTracker from './VisibilityTracker';
 import { Post } from '../types/mattermost-webapp';
 import { RootState } from '../store/types';
 import { selectReaders } from '../store/channelReaders';
 import { loadInitialReceipts } from '../store';
+import { reinitializeReadReceipts } from '../plugin';
 import styles from './PostReceipt.module.css';
 
 interface PostReceiptProps {
@@ -14,9 +15,16 @@ interface PostReceiptProps {
 
 const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
     const contextStore = useStore(); // uses the Provider injected by RootObserver
-    console.log('DEBUG: PostReceipt store instance:', contextStore);
+    const prevReadersRef = useRef<string[]>([]);
+    const reinitAttemptedRef = useRef<boolean>(false);
+    const reinitTimeoutRef = useRef<number | null>(null);
 
-    console.log('DEBUG: PostReceipt rendering...');
+    console.log('🔎 [PostReceipt] Component rendering:', {
+        postId: post?.id,
+        isTargetPost: post?.id === 'fpb56zb5ptdemeywszqqo5tywa',
+        storeAvailable: !!contextStore
+    });
+
     try {
         // Early returns for invalid posts
         if (!post?.id || !post?.user_id || !post?.channel_id) {
@@ -30,39 +38,90 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
 
         const messageId = post.id;
         const readerIds = useSelector((state: RootState) => {
-            // 1️⃣ try the expected nested shape
-            let readers = selectReaders(state, post.channel_id, messageId);
-            // 2️⃣ fallback to flat {postId: [...] } shape (seen in latest logs)
-            if (readers.length === 0 && (state as any).channelReaders?.[messageId]) {
-                readers = (state as any).channelReaders[messageId];
-            }
+            console.log('🔍 [PostReceipt] Selector execution:', {
+                postId: messageId,
+                isTargetPost: messageId === 'fpb56zb5ptdemeywszqqo5tywa',
+                channelId: post.channel_id,
+                reduxState: {
+                    hasChannelReaders: !!state.channelReaders,
+                    channelState: state.channelReaders[post.channel_id],
+                    postReaders: state.channelReaders[post.channel_id]?.[messageId]
+                }
+            });
+            const readers = selectReaders(state, post.channel_id, messageId);
+            console.log('📊 [PostReceipt] Selected readers:', {
+                postId: messageId,
+                isTargetPost: messageId === 'fpb56zb5ptdemeywszqqo5tywa',
+                selectedReaders: readers,
+                channelReadersState: state.channelReaders[post.channel_id]
+            });
             return readers;
         });
-        console.log(`[PostReceipt:${messageId}] readerIds:`, readerIds);
-        console.log('DEBUG: [PostReceipt] readerIds after useSelector:', readerIds, 'for post:', messageId);
 
-        // Get current user ID
+        // Track reader changes
+        useEffect(() => {
+            if (messageId === 'fpb56zb5ptdemeywszqqo5tywa') {
+                const addedReaders = readerIds.filter(id => !prevReadersRef.current.includes(id));
+                const removedReaders = prevReadersRef.current.filter(id => !readerIds.includes(id));
+                console.log('📱 [PostReceipt] Target post readers changed:', {
+                    postId: messageId,
+                    currentReaders: readerIds,
+                    previousReaders: prevReadersRef.current,
+                    addedReaders,
+                    removedReaders,
+                    timestamp: new Date().toISOString()
+                });
+                prevReadersRef.current = readerIds;
+            }
+        }, [readerIds, messageId]);
+
+        // Get current user ID with improved logging
         const currentUserId = document.cookie.match(/MMUSERID=([^;]+)/)?.[1] || 
                              window.localStorage.getItem('MMUSERID') || '';
         // Check if this is the user's own message
         const isOwnMessage = post.user_id === currentUserId;
 
+        console.log('👤 [PostReceipt] User context:', {
+            postId: messageId,
+            isTargetPost: messageId === 'fpb56zb5ptdemeywszqqo5tywa',
+            currentUserId,
+            postAuthorId: post.user_id,
+            isOwnMessage
+        });
+
         // Track if state has loaded
         const [hasLoadedState, setHasLoadedState] = React.useState(false);
         React.useEffect(() => {
             setHasLoadedState(true);
+            if (messageId === 'fpb56zb5ptdemeywszqqo5tywa') {
+                console.log('🔄 [PostReceipt] Target post state loaded:', {
+                    messageId,
+                    readerCount: readerIds.length,
+                    readers: readerIds,
+                    isOwnMessage,
+                    currentUserId
+                });
+            }
         }, [readerIds, messageId, isOwnMessage, currentUserId]);
 
         // If the state hasn't loaded yet, show skeleton
         if (!hasLoadedState) {
-            console.log('DEBUG: [PostReceipt] hasLoadedState is false, showing skeleton for post:', messageId);
-            // inline style avoids missing-CSS crash
+            console.log('⌛ [PostReceipt] State loading:', {
+                postId: messageId,
+                isTargetPost: messageId === 'fpb56zb5ptdemeywszqqo5tywa'
+            });
             return (<span style={{opacity:0.25, marginLeft:4}}>✓✓</span>);
         }
 
         // If there are no readers, don't render the receipt (but still render VisibilityTracker if not own message)
         if (readerIds.length === 0) {
             if (!isOwnMessage) {
+                console.log('👁️ [PostReceipt] No readers, showing tracker:', {
+                    postId: messageId,
+                    isTargetPost: messageId === 'fpb56zb5ptdemeywszqqo5tywa',
+                    authorId: post.user_id,
+                    channelId: post.channel_id
+                });
                 return (
                     <VisibilityTracker 
                         messageId={messageId} 
@@ -81,16 +140,26 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
             return null;
         }
 
-        // Determine if the message has been seen by the current user (using channelReaders only)
+        // Determine if the message has been seen by the current user
         const seenBy = readerIds.includes(currentUserId);
-
-        console.log('DEBUG: [PostReceipt] seenBy:', seenBy);
+        
+        if (messageId === 'fpb56zb5ptdemeywszqqo5tywa') {
+            console.log('👀 [PostReceipt] Target post seen status:', {
+                seenBy,
+                currentUserId,
+                readerIds,
+                isOwnMessage
+            });
+        }
 
         // Read receipts should ONLY be shown on the sender's own messages
         // If this is not the user's own message, only render the VisibilityTracker (if not seen)
         if (!isOwnMessage) {
-            console.log('DEBUG: [PostReceipt] Not own message, only rendering VisibilityTracker if not seen');
             if (!seenBy) {
+                console.log('👁️ [PostReceipt] Not own message, showing tracker:', {
+                    postId: messageId,
+                    isTargetPost: messageId === 'fpb56zb5ptdemeywszqqo5tywa'
+                });
                 return (
                     <VisibilityTracker 
                         messageId={messageId} 
@@ -109,31 +178,39 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
 
         // Get display names for readers using Mattermost's user profiles
         const seenByOthersDisplay = seenByOthers.map(userId => {
-            // Access Mattermost's user profiles directly from the global window store
             try {
                 const mattermostStore = (window as any).store;
                 if (mattermostStore) {
                     const user = mattermostStore.getState()?.entities?.users?.profiles?.[userId];
                     if (user) {
-                        // Priority: nickname > first+last name > username > fallback
                         const displayName = user.nickname || 
-                                          `${user.first_name || ''} ${user.last_name || ''}`.trim() || 
-                                          user.username ||
-                                          `User ${userId.substring(0, 8)}`;
-                        console.log('👤 [PostReceipt] User display name:', { userId, displayName, user });
+                                       `${user.first_name || ''} ${user.last_name || ''}`.trim() || 
+                                       user.username ||
+                                       `User ${userId.substring(0, 8)}`;
+                        if (messageId === 'fpb56zb5ptdemeywszqqo5tywa') {
+                            console.log('👤 [PostReceipt] Target post reader profile:', {
+                                userId,
+                                displayName,
+                                hasNickname: !!user.nickname,
+                                hasName: !!(user.first_name || user.last_name),
+                                hasUsername: !!user.username
+                            });
+                        }
                         return displayName;
                     }
                 }
-                console.warn('⚠️ [PostReceipt] User profile not found in Mattermost store:', userId);
-                return `User ${userId.substring(0, 8)}`; // Fallback with shortened ID
+                console.warn('⚠️ [PostReceipt] User profile not found:', userId);
+                return `User ${userId.substring(0, 8)}`;
             } catch (error) {
-                console.error('❌ [PostReceipt] Error getting user display name:', error);
-                return `User ${userId.substring(0, 8)}`; // Fallback with shortened ID
+                console.error('❌ [PostReceipt] Error getting display name:', {
+                    userId,
+                    error: error instanceof Error ? error.message : String(error)
+                });
+                return `User ${userId.substring(0, 8)}`;
             }
-        }).filter(name => name); // Filter out any empty names
+        }).filter(name => name);
 
-        // If the message is seen or it's the user's own message, render the receipt
-        // At this point we know it's the user's own message (due to early returns above)
+        // Return the receipt UI
         return (
             <div 
                 className="post-receipt-container" 
@@ -142,7 +219,6 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
                 data-is-own-message={isOwnMessage}
                 data-author-id={post.user_id}
             >
-                {/* Only show "Seen by" if others have read the message */}
                 {seenByOthers.length > 0 && (
                     <div 
                         className="post-receipt" 
@@ -164,7 +240,14 @@ const PostReceipt: FC<PostReceiptProps> = ({ post }): ReactElement | null => {
             </div>
         );
     } catch (error) {
-        console.error('❌ [PostReceipt] Error in PostReceipt component:', error);
+        console.error('❌ [PostReceipt] Error in component:', {
+            error: error instanceof Error ? error.message : String(error),
+            post: {
+                id: post?.id,
+                userId: post?.user_id,
+                channelId: post?.channel_id
+            }
+        });
         return null;
     }
 };

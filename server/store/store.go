@@ -40,6 +40,10 @@ type ReceiptStore interface {
 	GetReadersSince(channelID string, sinceMs int64, excludeUserID string) ([]string, error)
 	GetChannelReads(channelID string) ([]types.ChannelRead, error)
 	InitializeChannelReads() error
+
+	// New methods for read receipt handling
+	SaveReadEvent(event ReadEvent) error
+	GetMessageReaders(messageID string) ([]string, error)
 }
 
 // BaseStore provides common functionality for store implementations
@@ -76,4 +80,35 @@ func IsUniqueViolation(err error) bool {
 		return true
 	}
 	return false
+}
+
+// Save a read event to the database
+func (s *BaseStore) SaveReadEvent(event ReadEvent) error {
+	_, err := s.db.Exec(
+		"INSERT INTO ReadEvents (message_id, user_id, channel_id, timestamp) VALUES (?, ?, ?, ?)",
+		event.MessageID, event.UserID, event.ChannelID, event.Timestamp,
+	)
+	return err
+}
+
+// Get all readers for a specific message
+func (s *BaseStore) GetMessageReaders(messageID string) ([]string, error) {
+	rows, err := s.db.Query(
+		"SELECT DISTINCT user_id FROM ReadEvents WHERE message_id = ?",
+		messageID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var readers []string
+	for rows.Next() {
+		var userID string
+		if err := rows.Scan(&userID); err != nil {
+			return nil, err
+		}
+		readers = append(readers, userID)
+	}
+	return readers, nil
 }

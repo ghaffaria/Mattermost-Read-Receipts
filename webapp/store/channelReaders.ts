@@ -8,10 +8,18 @@ export interface ChannelReadersState {
     };
 }
 
+// Additional type for DM-specific actions
+export interface AddReaderPayload {
+    channelId: string;
+    postId: string;
+    userId: string;
+    isDM?: boolean;
+}
+
 // Ensure initialState is an empty object
 const initialState: ChannelReadersState = {};
 
-// Memoized selector to get readers for a specific post
+// Memoized selector with debug logging
 export const selectReaders = createSelector(
     [
         (state: RootState) => state.channelReaders,
@@ -19,6 +27,13 @@ export const selectReaders = createSelector(
         (_: RootState, _channelId: string, postId: string) => postId
     ],
     (channelReaders: ChannelReadersState, channelId: string, postId: string): string[] => {
+        console.log('🔍 [Redux Selector] Selecting readers:', {
+            channelId,
+            postId,
+            hasChannel: !!channelReaders[channelId],
+            hasPost: channelReaders[channelId]?.[postId] !== undefined,
+            readerCount: channelReaders[channelId]?.[postId]?.length || 0
+        });
         return channelReaders?.[channelId]?.[postId] ?? [];
     }
 );
@@ -36,33 +51,65 @@ const channelReadersSlice = createSlice({
             }>
         ) => {
             const { channelId, payload } = action.payload;
-            console.log('DEBUG: [Redux Reducer] setReaders called on Ali (sender) client:', { channelId, payload });
+            
             if (!state[channelId]) {
                 state[channelId] = {};
             }
-            state[channelId] = { ...state[channelId], ...payload };
-            console.log('DEBUG: [Redux Reducer] State after setReaders on Ali (sender) client for channel', channelId, ':', JSON.stringify(state[channelId]));
+
+            console.log('🔄 [Redux] Processing setReaders:', {
+                channelId,
+                payloadSize: Object.keys(payload).length
+            });
+
+            Object.entries(payload).forEach(([postId, userIds]) => {
+                state[channelId][postId] = userIds;
+            });
         },
+
         addReader: (
             state: ChannelReadersState,
-            action: PayloadAction<{
-                channelId: string;
-                postId: string;
-                userId: string;
-            }>
+            action: PayloadAction<AddReaderPayload>
         ) => {
-            const { channelId, postId, userId } = action.payload;
-            console.log('DEBUG: [Redux Reducer] addReader called on Ali (sender) client:', { channelId, postId, userId });
+            const { channelId, postId, userId, isDM } = action.payload;
+            
+            console.log('➕ [Redux] Processing addReader:', {
+                channelId,
+                postId,
+                userId,
+                isDM,
+                beforeState: state[channelId]?.[postId]
+            });
+
             if (!state[channelId]) {
                 state[channelId] = {};
             }
             if (!state[channelId][postId]) {
                 state[channelId][postId] = [];
             }
-            if (!state[channelId][postId].includes(userId)) {
-                state[channelId][postId].push(userId);
+
+            // Split userId if it's a comma-separated string (legacy format)
+            const userIds = userId.includes(',') ? userId.split(',') : [userId];
+
+            // For DMs, merge the reader without duplicates
+            if (isDM) {
+                const existingReaders = new Set(state[channelId][postId]);
+                userIds.forEach(id => existingReaders.add(id));
+                state[channelId][postId] = Array.from(existingReaders);
+            } else {
+                // For regular channels, just add if not already present
+                userIds.forEach(id => {
+                    if (!state[channelId][postId].includes(id)) {
+                        state[channelId][postId].push(id);
+                    }
+                });
             }
-            console.log('DEBUG: [Redux Reducer] State after addReader on Ali (sender) client for channel', channelId, 'post', postId, ':', JSON.stringify(state[channelId]?.[postId]));
+
+            console.log('✅ [Redux] Reader added:', {
+                channelId,
+                postId,
+                readers: state[channelId][postId],
+                isDM
+            });
         },
     },
 });

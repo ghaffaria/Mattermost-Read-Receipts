@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/arg/mattermost-readreceipts/server/store"
-	"github.com/arg/mattermost-readreceipts/server/types"
 	"github.com/gorilla/mux"
 	"github.com/mattermost/mattermost-server/v6/model"
 	"github.com/mattermost/mattermost-server/v6/plugin"
@@ -99,6 +98,9 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 		"csrf_token", r.Header.Get("X-CSRF-Token") != "",
 	)
 
+	// Verify log level at the start of every read receipt request
+	p.API.LogWarn("[DEBUG-RR] Current plugin log level for read receipt handling: " + p.getConfiguration().LogLevel)
+
 	decoder := json.NewDecoder(r.Body)
 	var req ReadRequest
 	if err := decoder.Decode(&req); err != nil {
@@ -139,151 +141,221 @@ func (p *Plugin) HandleReadReceipt(w http.ResponseWriter, r *http.Request) {
 			"message_id", req.MessageID)
 	}
 
-	// Get channel info for enhanced debugging
-	channel, channelErr := p.API.GetChannel(channelID)
-	if channelErr != nil {
-		p.logError("[API] CRITICAL - Failed to get channel info", "channelID", channelID, "error", channelErr.Error())
-	} else {
-		p.logError("[API] CRITICAL - Channel details", "channelID", channelID, "channelType", channel.Type, "channelName", channel.Name, "teamID", channel.TeamId, "isDM", channel.Type == "D")
-
-		// For DM channels, get the members
-		if channel.Type == "D" {
-			members, membersErr := p.API.GetChannelMembers(channelID, 0, 10)
-			if membersErr != nil {
-				p.logError("[API] CRITICAL - Failed to get DM channel members", "channelID", channelID, "error", membersErr.Error())
-			} else {
-				memberIDs := make([]string, len(members))
-				for i, member := range members {
-					memberIDs[i] = member.UserId
-				}
-				p.logError("[API] CRITICAL - DM channel members", "channelID", channelID, "memberCount", len(members), "memberIDs", memberIDs, "readerUserID", userID)
-			}
-		}
+	// Get channel info to check if it's a DM
+	channel, appErr := p.API.GetChannel(channelID)
+	if appErr != nil {
+		p.logError("[API] Failed to get channel info", "channel_id", channelID, "error", appErr.Error())
+		http.Error(w, "Failed to get channel info", http.StatusInternalServerError)
+		return
 	}
 
-	// Store the read receipt
-	now := time.Now().UnixMilli() // Use milliseconds instead of seconds
-	event := store.ReadEvent{
+	// Save receipt to database first
+	readEvent := store.ReadEvent{
 		MessageID: req.MessageID,
 		UserID:    userID,
 		ChannelID: channelID,
-		Timestamp: now,
+		Timestamp: time.Now().UnixMilli(),
 	}
 
-	// Begin transaction
-	tx, txErr := p.store.BeginTx()
-	if txErr != nil {
-		p.logError("[API] Failed to begin transaction", "error", txErr.Error())
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-	defer tx.Rollback()
-
-	// Store read receipt
-	if err := p.store.UpsertTx(tx, event); err != nil {
-		p.logError("[API] Failed to store read receipt",
-			"message_id", req.MessageID,
-			"user_id", userID,
-			"channel_id", channelID,
-			"error", err.Error(),
-		)
-		http.Error(w, "Failed to store read receipt", http.StatusInternalServerError)
-		return
-	}
-
-	// Update channel read status
-	channelRead := types.ChannelRead{
-		ChannelID:  channelID,
-		UserID:     userID,
-		LastPostID: req.MessageID,
-		LastSeenAt: now,
-	}
-	if err := p.store.UpsertChannelReadTx(tx, channelRead); err != nil {
-		p.logError("[API] Failed to update channel read",
-			"channel_id", channelID,
-			"user_id", userID,
-			"error", err.Error(),
-		)
-		http.Error(w, "Failed to update channel read status", http.StatusInternalServerError)
-		return
-	}
-
-	// Commit transaction
-	if err := tx.Commit(); err != nil {
-		p.logError("[API] Failed to commit transaction",
-			"error", err.Error(),
-		)
-		http.Error(w, "Failed to commit transaction", http.StatusInternalServerError)
-		return
-	}
-
-	// Broadcast receipt via WebSocket to the post's author (not the reader)
-	authorID := post.UserId
-	p.logDebug("[RR] WS payload (to author)", "payload", map[string]interface{}{
-		"MessageID": post.Id,
-		"UserID":    userID,
-		"ChannelID": post.ChannelId,
-		"AuthorID":  authorID,
-	})
-	p.API.PublishWebSocketEvent(
-		WebSocketEventReadReceipt,
-		map[string]interface{}{
-			"MessageID": post.Id,
-			"UserID":    userID,
-			"ChannelID": post.ChannelId,
-		},
-		&model.WebsocketBroadcast{
-			UserId: authorID, // Only send to the author
-		},
+	p.logDebug("[API] Attempting to save read event",
+		"message_id", req.MessageID,
+		"user_id", userID,
+		"channel_id", channelID,
 	)
 
-	// Get all users who have read this specific message to broadcast channel readers update
-	var channelEvents []store.ReadEvent
-	var eventsErr error
-	channelEvents, eventsErr = p.store.GetByChannel(channelID, "")
-	if eventsErr != nil {
-		p.logError("[API] Failed to get channel events", "channel_id", channelID, "error", eventsErr.Error())
-		// Don't fail the request, just log the error
-	} else {
-		p.logError("[API] DEBUG: Retrieved channel events", "channel_id", channelID, "event_count", len(channelEvents), "target_message_id", req.MessageID)
+	if err := p.store.Upsert(readEvent); err != nil {
+		p.logError("[API] Failed to save read event", "error", err.Error())
+		http.Error(w, "Failed to save read event", http.StatusInternalServerError)
+		return
+	}
 
-		// Filter events for this specific message and extract user IDs
-		var userIDs []string
-		userIDMap := make(map[string]bool)
+	p.logDebug("[API] Successfully saved read event",
+		"message_id", req.MessageID,
+		"user_id", userID,
+	)
+
+	// Get all current readers for this message first
+	channelEvents, storeErr := p.store.GetByChannel(channelID, "")
+	if storeErr != nil {
+		p.logError("[API] Failed to get channel events", "channel_id", channelID, "error", storeErr.Error())
+	}
+
+	// Initialize with current reader
+	userIDs := []string{userID}
+	userIDMap := map[string]bool{userID: true}
+
+	// Add historical readers
+	if storeErr == nil {
 		for _, event := range channelEvents {
-			p.logError("[API] DEBUG: Checking event", "event_message_id", event.MessageID, "target_message_id", req.MessageID, "matches", event.MessageID == req.MessageID)
-			if event.MessageID == req.MessageID {
+			if event.MessageID == req.MessageID && !userIDMap[event.UserID] {
 				userIDMap[event.UserID] = true
-				p.logError("[API] DEBUG: Added user to readers", "user_id", event.UserID)
+				userIDs = append(userIDs, event.UserID)
 			}
 		}
-		userIDs = make([]string, 0, len(userIDMap))
-		for userID := range userIDMap {
-			userIDs = append(userIDs, userID)
+	}
+
+	if channel.Type == model.ChannelTypeDirect {
+		// DM channel handling - notify the other participant only
+		p.API.LogWarn("[DEBUG-RR-DM] 🔍 Starting DM read receipt processing",
+			"channelID", channelID,
+			"messageID", req.MessageID,
+			"readerID", userID,
+			"postAuthorID", post.UserId,
+		)
+
+		// Log current state of readers
+		p.API.LogWarn("[DEBUG-RR-DM] 📊 Current readers state",
+			"allReaders", userIDs,
+			"currentReader", userID,
+			"messageID", req.MessageID,
+		)
+
+		// Get DM channel members
+		members, appErr := p.API.GetChannelMembers(channelID, 0, 2)
+		if appErr != nil {
+			p.logError("[API] Failed to get DM members", "channel_id", channelID, "error", appErr.Error())
+			http.Error(w, "Failed to get DM members", http.StatusInternalServerError)
+			return
 		}
 
-		p.logDebug("🚀 [API] About to publish channel readers update", "channelID", channelID, "lastPostID", req.MessageID, "userIDs", userIDs, "reader_count", len(userIDs))
+		p.API.LogWarn("[DEBUG-RR-DM] 👥 DM channel members retrieved",
+			"memberCount", len(members),
+			"channelID", channelID,
+		)
+
+		// Send to other DM participant only
+		for _, member := range members {
+			if member.UserId != userID {
+				// Build event data with detailed state
+				eventData := map[string]interface{}{
+					"MessageID": req.MessageID,
+					"UserID":    userID,
+					"ChannelID": channelID,
+					"IsDM":      true,
+					"Timestamp": readEvent.Timestamp,
+					"ReaderIDs": userIDs,
+					"Author":    post.UserId,
+				}
+
+				p.API.LogWarn("[DEBUG-RR-DM] 📨 Preparing to send DM read receipt",
+					"targetUserID", member.UserId,
+					"messageID", req.MessageID,
+					"readerIDs", userIDs,
+					"eventData", eventData,
+				)
+
+				// Send to other participant
+				p.API.PublishWebSocketEvent(
+					WebSocketEventReadReceipt,
+					eventData,
+					&model.WebsocketBroadcast{
+						UserId: member.UserId,
+					},
+				)
+
+				p.API.LogWarn("[DEBUG-RR-DM] ✅ Sent read receipt to DM participant",
+					"targetUserID", member.UserId,
+					"messageID", req.MessageID,
+				)
+
+				// If message author is different from both participants, notify them too
+				if post.UserId != member.UserId && post.UserId != userID {
+					p.API.LogWarn("[DEBUG-RR-DM] 📨 Sending read receipt to message author",
+						"authorID", post.UserId,
+						"messageID", req.MessageID,
+					)
+
+					p.API.PublishWebSocketEvent(
+						WebSocketEventReadReceipt,
+						eventData,
+						&model.WebsocketBroadcast{
+							UserId: post.UserId,
+						},
+					)
+
+					p.API.LogWarn("[DEBUG-RR-DM] ✅ Sent read receipt to message author",
+						"authorID", post.UserId,
+						"messageID", req.MessageID,
+					)
+				}
+
+				p.API.LogWarn("[DEBUG-RR-DM] 🏁 Completed DM read receipt processing",
+					"messageID", req.MessageID,
+					"readerID", userID,
+					"channelID", channelID,
+				)
+
+				break // Only need to send to one other participant
+			}
+		}
+	} else {
+		// Standard channel broadcast logic
+		p.API.LogWarn("[DEBUG-RR] Processing read receipt for standard channel:",
+			"channelID", channelID,
+			"messageID", req.MessageID,
+			"readerID", userID,
+		)
+
+		// Send read receipt to the author
 		p.API.PublishWebSocketEvent(
-			"custom_mattermost-readreceipts_channel_readers",
+			WebSocketEventReadReceipt,
 			map[string]interface{}{
-				"ChannelID":  post.ChannelId,
-				"LastPostID": post.Id,
+				"MessageID": post.Id,
+				"UserID":    userID,
+				"ChannelID": channelID,
+			},
+			&model.WebsocketBroadcast{
+				UserId: post.UserId,
+			},
+		)
+
+		// For regular channels, broadcast channel readers update
+		p.API.LogDebug("[DEBUG-RR] Broadcasting channel readers update",
+			"channelID", channelID,
+			"messageID", req.MessageID,
+			"readerID", userID,
+		)
+
+		// Gather all current readers for this message
+		channelEvents, storeErr := p.store.GetByChannel(channelID, "")
+		if storeErr != nil {
+			p.logError("[API] Failed to get channel events", "channel_id", channelID, "error", storeErr.Error())
+		}
+
+		// Initialize with current reader
+		userIDs := []string{userID}
+		userIDMap := map[string]bool{userID: true}
+
+		// Add historical readers
+		if storeErr == nil {
+			for _, event := range channelEvents {
+				if event.MessageID == req.MessageID && !userIDMap[event.UserID] {
+					userIDMap[event.UserID] = true
+					userIDs = append(userIDs, event.UserID)
+				}
+			}
+		}
+
+		// Single broadcast with all readers
+		p.API.PublishWebSocketEvent(
+			WebSocketEventChannelReaders,
+			map[string]interface{}{
+				"ChannelID":  channelID,
+				"LastPostID": req.MessageID,
 				"UserIDs":    userIDs,
 			},
 			&model.WebsocketBroadcast{
-				ChannelId: post.ChannelId,
-				OmitUsers: map[string]bool{userID: true},
+				ChannelId: channelID,
 			},
 		)
-		p.logDebug("✅ [API] Published channel readers WebSocket event")
 	}
 
-	// Write success response
+	// No final broadcast needed - DM and channel broadcasts are already handled above
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status": "ok",
-		"event":  event,
 	})
 }
 
@@ -539,4 +611,14 @@ func (p *Plugin) getSinceMillis(r *http.Request) (int64, error) {
 	}
 
 	return 0, fmt.Errorf("missing since or postID")
+}
+
+// Helper function to check if a user is in a list
+func containsUser(users []string, userID string) bool {
+	for _, u := range users {
+		if u == userID {
+			return true
+		}
+	}
+	return false
 }

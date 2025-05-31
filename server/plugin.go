@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/arg/mattermost-readreceipts/server/store"
 	_ "github.com/go-sql-driver/mysql"
@@ -20,6 +21,10 @@ type Plugin struct {
 
 	store            store.ReceiptStore // backing DB store
 	readReceiptStore *ReadReceiptStore  // helper wrapper
+
+	// Add connection tracking
+	isConnected  bool
+	dbConnection *sql.DB
 
 	conf   *Configuration
 	stopCh chan struct{}
@@ -62,62 +67,121 @@ func (p *Plugin) OnActivate() error {
 		return errors.Wrap(err, "failed to load configuration")
 	}
 
+	// Enhanced logging for activation
+	p.API.LogWarn("[DEBUG-RR] Plugin activation started with log level: " + p.getConfiguration().LogLevel)
+
 	// Check if plugin is enabled in configuration
 	if !p.getConfiguration().Enable {
 		p.logInfo("[Plugin] Plugin disabled via configuration")
 		return nil
 	}
 
-	p.logDebug("[Plugin] Activating read receipts plugin...")
-
-	// Get database driver type from Mattermost config
-	config := p.API.GetUnsanitizedConfig()
-	if config == nil {
-		return errors.New("failed to get Mattermost config")
+	// Close any existing connection before re-initializing
+	if p.dbConnection != nil {
+		if err := p.dbConnection.Close(); err != nil {
+			p.logError("[Plugin] Error closing existing database connection:", "error", err.Error())
+		}
+		p.dbConnection = nil
+		p.store = nil
+		p.isConnected = false
 	}
 
-	if config.SqlSettings.DriverName == nil {
-		return errors.New("database driver name not configured")
+	// Get database configuration with retries
+	var config *model.Config
+	for attempts := 0; attempts < 3; attempts++ {
+		config = p.API.GetUnsanitizedConfig()
+		if config != nil && config.SqlSettings.DriverName != nil {
+			break
+		}
+		p.logInfo("[Plugin] Waiting for Mattermost config (attempt %d of 3)", attempts+1)
+		time.Sleep(time.Second)
+	}
+
+	if config == nil || config.SqlSettings.DriverName == nil {
+		return errors.New("failed to get Mattermost config after retries")
 	}
 
 	driverName := *config.SqlSettings.DriverName
-	p.logDebug("[Plugin] Using database driver", "driver", driverName)
+	p.logInfo("[Plugin] Using database driver", "driver", driverName)
 
 	if config.SqlSettings.DataSource == nil || *config.SqlSettings.DataSource == "" {
-		return errors.New("database connection string not configured; please set System Console → Environment → Database")
+		return errors.New("database connection string not configured")
 	}
 
-	// Use the configured DSN directly
 	dsn := *config.SqlSettings.DataSource
-	p.logInfo("[Plugin] Using database connection from Mattermost configuration")
 
-	// Open a new database connection using the determined DSN
-	db, err := sql.Open(driverName, dsn)
+	// Open database with retry logic
+	var db *sql.DB
+	var err error
+	for attempts := 0; attempts < 3; attempts++ {
+		db, err = sql.Open(driverName, dsn)
+		if err == nil {
+			// Test the connection
+			if err := db.Ping(); err == nil {
+				break
+			}
+			db.Close()
+		}
+		p.logError("[Plugin] Database connection attempt %d failed: %v", attempts+1, err)
+		time.Sleep(time.Second)
+	}
+
 	if err != nil {
-		return errors.Wrap(err, "failed to connect to database")
+		return errors.Wrap(err, "failed to establish database connection after retries")
 	}
 
-	// Test the connection
-	if err := db.Ping(); err != nil {
-		return errors.Wrap(err, "failed to ping database")
+	p.dbConnection = db
+
+	// Configure connection pool
+	db.SetMaxOpenConns(5)
+	db.SetMaxIdleConns(2)
+	db.SetConnMaxLifetime(time.Hour)
+
+	// Initialize store with new connection
+	switch driverName {
+	case "postgres":
+		p.store = store.NewPostgresStore(db)
+	case "mysql":
+		p.store = store.NewMySQLStore(db)
+	default:
+		return errors.Errorf("unsupported database driver: %s", driverName)
 	}
 
-	// Initialize store with database connection
-	if p.store == nil {
-		switch driverName {
-		case "postgres":
-			p.store = store.NewPostgresStore(db)
-		case "mysql":
-			p.store = store.NewMySQLStore(db)
-		default:
-			return errors.Errorf("unsupported database driver: %s", driverName)
+	p.readReceiptStore = &ReadReceiptStore{Store: p.store}
+	p.isConnected = true
+
+	// Start health check goroutine
+	p.stopCh = make(chan struct{})
+	go p.runHealthCheck(p.stopCh)
+
+	p.API.LogWarn("[DEBUG-RR] Plugin activation completed successfully")
+	return nil
+}
+
+// Add health check routine
+func (p *Plugin) runHealthCheck(stopCh chan struct{}) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-stopCh:
+			return
+		case <-ticker.C:
+			if p.dbConnection != nil {
+				if err := p.dbConnection.Ping(); err != nil {
+					p.logError("[Plugin] Database health check failed:", "error", err.Error())
+					p.isConnected = false
+					// Trigger reactivation
+					go func() {
+						if err := p.OnActivate(); err != nil {
+							p.logError("[Plugin] Reactivation failed:", "error", err.Error())
+						}
+					}()
+				}
+			}
 		}
 	}
-
-	// Initialise helper-store exactly once
-	p.readReceiptStore = &ReadReceiptStore{Store: p.store}
-	p.logInfo("[Plugin] Read-Receipts plugin activated")
-	return nil
 }
 
 // Example of how to use the store interface for database operations
@@ -166,6 +230,14 @@ func (p *Plugin) OnDeactivate() error {
 	if p.stopCh != nil {
 		close(p.stopCh)
 		p.stopCh = nil
+	}
+
+	// Close the database connection if it exists
+	if p.dbConnection != nil {
+		if err := p.dbConnection.Close(); err != nil {
+			p.logError("[Plugin] Error closing database connection:", "error", err.Error())
+		}
+		p.dbConnection = nil
 	}
 
 	return nil

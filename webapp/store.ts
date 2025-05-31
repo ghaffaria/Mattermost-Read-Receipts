@@ -1,7 +1,7 @@
 // webapp/store.ts
 
 import { Store, Dispatch } from 'redux';
-import { addReader } from './store/channelReaders';
+import { addReader, setReaders, AddReaderPayload } from './store/channelReaders';
 
 export interface MattermostUser {
     id: string;
@@ -11,10 +11,33 @@ export interface MattermostUser {
     nickname?: string;
 }
 
+interface MattermostChannel {
+    id: string;
+    type: string;
+    name: string;
+}
+
 interface MattermostState {
     entities: {
         users: {
             profiles: Record<string, MattermostUser>;
+        };
+        channels?: {
+            channels: Record<string, MattermostChannel>;
+        };
+    };
+}
+
+interface MattermostStateWithPosts extends MattermostState {
+    entities: {
+        users: {
+            profiles: Record<string, MattermostUser>;
+        };
+        posts: {
+            posts: Record<string, Post>;
+        };
+        channels?: {
+            channels: Record<string, MattermostChannel>;
         };
     };
 }
@@ -45,6 +68,52 @@ export const setMattermostStore = (store: Store<MattermostState> | null) => {
             hasStore: true,
             userProfiles: Object.keys(state.entities.users.profiles).length
         });
+
+        // Load initial plugin config
+        fetchPluginConfig().then(() => {
+            console.log('⚙️ [Store] Plugin config loaded on initialization');
+        });
+
+        // Track seen posts to avoid duplicate processing
+        const processedPosts = new Set<string>();
+
+        // Subscribe to post updates to handle new messages
+        store.subscribe(() => {
+            const currentState = store.getState() as MattermostStateWithPosts;
+            const posts = currentState?.entities?.posts?.posts || {};
+            const channels = currentState?.entities?.channels?.channels || {};
+            
+            // Check for new DM posts
+            Object.entries(posts).forEach(([postId, post]) => {
+                if (post && !processedPosts.has(postId)) {
+                    processedPosts.add(postId);
+                    
+                    const channel = channels[post.channel_id];
+                    if (channel?.type === 'D') { // Direct Message channel
+                        console.log('📨 [Store] New DM message detected:', {
+                            postId,
+                            channelId: post.channel_id,
+                            timestamp: new Date().toISOString()
+                        });
+                        
+                        // Load latest channel state including this message
+                        setTimeout(() => {
+                            loadInitialReceipts(post.channel_id, store.dispatch, false)
+                                .then(() => {
+                                    console.log('✅ [Store] DM channel state loaded for new message:', {
+                                        channelId: post.channel_id,
+                                        postId
+                                    });
+                                })
+                                .catch(error => {
+                                    console.error('❌ [Store] Failed to load DM channel state:', error);
+                                });
+                        }, 1000); // Small delay to ensure server has processed any read receipts
+                    }
+                }
+            });
+        });
+
     } catch (error) {
         console.error('❌ [Store] Failed to initialize store:', error);
     }
@@ -202,6 +271,70 @@ export const updateReadReceipts = (messageId: string, userId: string, isRealTime
     }
 };
 
+export const updateReceipts = (messageId: string, userId: string, isRealTimeUpdate: boolean = false) => {
+    console.log('✏️ [Store] Updating receipts:', {
+        messageId,
+        userId,
+        isRealTimeUpdate,
+        beforeState: receiptMap.get(messageId)
+    });
+
+    let readers = receiptMap.get(messageId);
+    if (!readers) {
+        readers = new Set<string>();
+        receiptMap.set(messageId, readers);
+    }
+    
+    // Add the reader
+    readers.add(userId);
+
+    console.log('✅ [Store] Receipt added:', {
+        messageId,
+        userId,
+        isRealTimeUpdate,
+        afterState: Array.from(readers)
+    });
+
+    // Get store
+    const store = getMattermostStore();
+    if (!store) {
+        console.error('❌ [Store] Store not available for dispatch');
+        return;
+    }
+
+    try {
+        // Enhanced Redux action with DM support
+        console.log('📢 [Store] Dispatching receipt update for messageId:', messageId);
+        const channelId = messageId.split(':')[0];
+        
+        // First update the receipt map
+        const payload: AddReaderPayload = {
+            channelId,
+            postId: messageId,
+            userId,
+            isDM: true
+        };
+        
+        store.dispatch(addReader(payload));
+        
+        // Then dispatch a custom event for immediate UI update
+        console.log('📣 [Store] Broadcasting receipt update event');
+        const event = new CustomEvent(STORE_UPDATE_EVENT, {
+            detail: {
+                type: 'receipt_added',
+                messageId,
+                userId,
+                channelId,
+                readers: Array.from(readers)
+            }
+        });
+        window.dispatchEvent(event);
+        
+    } catch (error) {
+        console.error('❌ [Store] Failed to dispatch:', error);
+    }
+};
+
 export const getUserProfiles = (): Record<string, MattermostUser> => {
     if (!mattermostStore) {
         console.error('❌ [Store] Cannot get user profiles: store not initialized');
@@ -323,6 +456,20 @@ export const loadInitialReceipts = async (channelId: string, dispatch?: Dispatch
             receiptsResponse.json() as Promise<ReadEvent[]>,
             readsResponse.json() as Promise<ChannelRead[]>
         ]);
+
+        // Log raw API responses before any processing
+        console.log('踏 [Store] API Response - loadInitialReceipts - Raw ReceiptsData:', {
+            endpoint: `/plugins/mattermost-readreceipts/api/v1/receipts?channel_id=${channelId}`,
+            status: receiptsResponse.status,
+            responseBody: JSON.stringify(receiptsData, null, 2),
+            timestamp: new Date().toISOString()
+        });
+        console.log('踏 [Store] API Response - loadInitialReceipts - Raw ChannelReads:', {
+            endpoint: `/plugins/mattermost-readreceipts/api/v1/channel/${channelId}/reads`,
+            status: readsResponse.status,
+            responseBody: JSON.stringify(channelReads, null, 2),
+            timestamp: new Date().toISOString()
+        });
         
         // Ensure we have arrays even if backend returns null
         receiptsData = receiptsData || [];
@@ -386,20 +533,45 @@ export const loadInitialReceipts = async (channelId: string, dispatch?: Dispatch
             }
         });
 
-        // Update both receipt map and Redux store
-        messageReceiptsMap.forEach((users, messageId) => {
-            // Update in-memory map
-            receiptMap.set(messageId, users);
-            
-            // Update Redux store if dispatch is available
-            if (dispatch) {
-                dispatch(addReader({
-                    channelId,
-                    postId: messageId,
-                    userId: Array.from(users).join(',') // Store all readers
-                }));
-            }
+        // REDUX TRACE - Initial Load Processing
+        console.log('識 [Redux Trace] Processing messageReceiptsMap for dispatch:', {
+            channelId,
+            totalMessages: messageReceiptsMap.size,
+            messageMap: Array.from(messageReceiptsMap.entries()).map(([msgId, users]) => ({
+                messageId: msgId,
+                userCount: users.size,
+                users: Array.from(users)
+            }))
         });
+
+        // Build setReaders payload with detailed logging
+        const setReadersPayload: Record<string, string[]> = {};
+        messageReceiptsMap.forEach((users, messageId) => {
+            const userArray = Array.from(users);
+            setReadersPayload[messageId] = userArray;
+            console.log('識 [Redux Trace] Processing message for setReaders:', {
+                messageId,
+                channelId,
+                userCount: userArray.length,
+                users: userArray
+            });
+        });
+
+        // Final payload verification before dispatch
+        console.log('識 [Redux Trace] Final setReaders payload:', {
+            channelId,
+            totalMessages: Object.keys(setReadersPayload).length,
+            structure: {
+                actionType: 'channelReaders/setReaders',
+                payload: { channelId, payload: setReadersPayload }
+            },
+            timestamp: new Date().toISOString()
+        });
+
+        if (dispatch) {
+            dispatch(setReaders({ channelId, payload: setReadersPayload }));
+            console.log('識 [Redux Trace] setReaders dispatch complete for channel:', channelId);
+        }
 
         console.log('💾 [Store] Updated maps:', {
             channelId,
@@ -460,6 +632,9 @@ interface MattermostStateWithPosts extends MattermostState {
         posts: {
             posts: Record<string, Post>;
         };
+        channels?: {
+            channels: Record<string, MattermostChannel>;
+        };
     };
 }
 
@@ -495,6 +670,16 @@ export const loadChannelReads = async (channelId: string, isInitialLoad: boolean
 
         const reads: ChannelRead[] = await response.json();
         
+        // Log raw API response before any processing
+        console.log('踏 [Store] API Response - loadChannelReads:', {
+            endpoint: `/plugins/mattermost-readreceipts/api/v1/channel/${channelId}/reads`,
+            status: response.status,
+            responseBody: JSON.stringify(reads, null, 2),
+            count: reads?.length || 0,
+            hasData: !!reads,
+            timestamp: new Date().toISOString()
+        });
+
         // Initialize channel map if needed
         if (!channelReadMap.has(channelId)) {
             channelReadMap.set(channelId, new Map());

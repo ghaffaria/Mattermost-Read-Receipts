@@ -1,6 +1,7 @@
 import { Store } from 'redux';
 import { configureStore, EnhancedStore } from '@reduxjs/toolkit';
 import { setMattermostStore as setLegacyMattermostStore } from './legacyStore';
+import { setMattermostStore as setMainMattermostStore } from '../store';
 import channelReadersReducer from './channelReaders';
 
 // Store types
@@ -144,6 +145,8 @@ export const setMattermostStore = async (mattermostStore: Store<any>): Promise<v
 
                 // Initialize legacy store first
                 await setLegacyMattermostStore(mattermostStore);
+                // Ensure main store reference in store.ts is also set
+                setMainMattermostStore(mattermostStore);
 
                 // Get initial user profiles
                 const state = mattermostStore.getState();
